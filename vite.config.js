@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/alquileres-lite/', // <-- nombre exacto de TU repo
+  base: '/alquileres-lite/', // <-- nombre exacto de TU repoo
 })
