@@ -147,7 +147,7 @@ export default function App() {
       <header className="sticky top-0 z-10 backdrop-blur bg-white/80 border-b">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold">
-            Alquileres <span className="text-blue-600">Lite</span>
+            Alquileres <span className="text-blue-600">Admin</span>
           </h1>
           <div className="flex gap-2">
             <input
