@@ -13,26 +13,48 @@ const fmtMoney = (n) =>
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 // JSONP simple (para evitar CORS)
-function jsonp(url) {
+function jsonp(url, timeout = 12000) {
   return new Promise((resolve, reject) => {
     const cb = "cb_" + Date.now() + "_" + Math.random().toString(36).slice(2);
     const s = document.createElement("script");
     const sep = url.includes("?") ? "&" : "?";
-    s.src = `${url}${sep}callback=${cb}`;
+    // cache-buster para móviles y CDNs
+    s.src = `${url}${sep}callback=${cb}&t=${Date.now()}`;
     s.async = true;
-    window[cb] = (data) => {
-      resolve(data);
-      delete window[cb];
-      s.remove();
+
+    let done = false;
+    const cleanup = () => {
+      if (window[cb]) delete window[cb];
+      if (s && s.parentNode) s.parentNode.removeChild(s);
     };
+
+    const to = setTimeout(() => {
+      if (done) return;
+      done = true;
+      cleanup();
+      reject(new Error("JSONP timeout"));
+    }, timeout);
+
+    window[cb] = (data) => {
+      if (done) return;
+      done = true;
+      clearTimeout(to);
+      cleanup();
+      resolve(data);
+    };
+
     s.onerror = () => {
-      delete window[cb];
-      s.remove();
+      if (done) return;
+      done = true;
+      clearTimeout(to);
+      cleanup();
       reject(new Error("JSONP error"));
     };
+
     document.body.appendChild(s);
   });
 }
+
 
 // Normaliza valores de fecha a YYYY-MM-DD para inputs type="date"
 const toYMD = (x) => {
@@ -62,18 +84,19 @@ export default function App() {
   }
 
   /* --- API --- */
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await jsonp(`${GAS_URL}?action=list`);
-      setItems(data.items || []);
-    } catch (e) {
-      console.error(e);
-      showToast("Error cargando datos", "error");
-    } finally {
-      setLoading(false);
-    }
+async function load() {
+  setLoading(true);
+  try {
+    const data = await jsonp(`${GAS_URL}?action=list`);
+    setItems(data.items || []);
+  } catch (e) {
+    console.error("Error list JSONP:", e);
+    showToast("Error cargando datos", "error");
+  } finally {
+    setLoading(false);
   }
+}
+
 
   async function createOrUpdate(payload) {
     const action = payload.id ? "update" : "create";
