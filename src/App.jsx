@@ -724,7 +724,7 @@ export default function App() {
         </div>
 
         <p className="text-xs text-gray-500 mt-3">
-          * Desarrollado por Kevin Iacovantuono
+          * Desarrollado por Kevin Iacovantuono - V1
         </p>
       </main>
 
