@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const API_URL = "https://alquileres-sec.kevinrun12.workers.dev";
 
-/* ================== Helpers ================== */
+/* ================== Helpers ==================2 */
 
 // Formato moneda
 const fmtMoney = (n) =>
