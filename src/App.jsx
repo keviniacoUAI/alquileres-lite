@@ -2,7 +2,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const API_URL = "https://alquileres-sec.kevinrun12.workers.dev";
 
-/* ================== Helpers ==================2 */
+/* ================== Helpers ================== */
+
+// Estado del contrato según la fecha de fin
+function contractStatus(c) {
+  const f = parseYMD(c.fin);
+  if (!f) return 'ok'; // sin fecha de fin -> sin destaque
+
+  // normalizamos hoy a medianoche
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.ceil((f - today) / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) return 'expired';     // ya vencido
+  if (diffDays <= 92) return 'soon';      // ~3 meses
+  return 'ok';
+}
+
 
 // Formato moneda
 const fmtMoney = (n) =>
@@ -164,6 +181,9 @@ export default function App() {
   const [openMenuId, setOpenMenuId] = useState(null);
   const menuRef = useRef(null);
 
+  // Filtro de estado: 'all' | 'expired' | 'soon' | 'active_or_soon'
+const [statusFilter, setStatusFilter] = useState('all');
+
   // UX
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState({ show: false, type: "success", text: "" });
@@ -223,14 +243,24 @@ export default function App() {
 
   useEffect(() => { load(); }, []);
 
-  const filtered = useMemo(() => {
-    const q = query.toLowerCase();
-    return items.filter(
-      (r) =>
-        String(r.domicilio || "").toLowerCase().includes(q) ||
-        String(r.inquilino || "").toLowerCase().includes(q)
-    );
-  }, [items, query]);
+const filtered = useMemo(() => {
+  const q = query.toLowerCase();
+
+  const byText = items.filter((r) =>
+    String(r.domicilio || '').toLowerCase().includes(q) ||
+    String(r.inquilino || '').toLowerCase().includes(q)
+  );
+
+  if (statusFilter === 'all') return byText;
+
+  return byText.filter((c) => {
+    const st = contractStatus(c); // usa el helper que ya agregamos
+    if (statusFilter === 'expired') return st === 'expired';
+    if (statusFilter === 'soon') return st === 'soon';
+    if (statusFilter === 'active_or_soon') return st === 'soon' || st === 'ok';
+    return true;
+  });
+}, [items, query, statusFilter]);
 
   /* -------- Contratos UI -------- */
   function startNew() {
@@ -634,26 +664,57 @@ export default function App() {
           <h1 className="text-2xl font-bold">
             Alquileres <span className="text-blue-600">Admin</span>
           </h1>
-          <div className="flex gap-2">
-            <input
-              type="search"
-              placeholder="Buscar por domicilio o inquilino"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="px-3 py-2 border rounded-xl text-sm w-72 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <button
-              onClick={startNew}
-              className={`${BTN.base} ${BTN.success} ${BTN.md}`}
-            >
-              Nuevo
-            </button>
-          </div>
+          <div className="flex gap-2 items-center">
+  <input
+    type="search"
+    placeholder="Buscar por domicilio o inquilino"
+    value={query}
+    onChange={(e) => setQuery(e.target.value)}
+    className="px-3 py-2 border rounded-xl text-sm w-72 focus:outline-none focus:ring-2 focus:ring-blue-500"
+  />
+
+  <select
+    value={statusFilter}
+    onChange={(e) => setStatusFilter(e.target.value)}
+    className="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+    title="Filtrar por estado del contrato"
+  >
+    <option value="all">Todos</option>
+    <option value="expired">Vencidos</option>
+    <option value="soon">Por vencer (≤ 3 meses)</option>
+    <option value="active_or_soon">Vigentes y por vencer</option>
+  </select>
+
+  <button
+    onClick={startNew}
+    className={`${BTN.base} ${BTN.success} ${BTN.md}`}
+  >
+    Nuevo
+  </button>
+</div>
+
         </div>
       </header>
 
       <main className="max-w-[1320px] mx-auto p-4">
-        <div className="bg-white rounded-2xl shadow-sm border px-4 pr-8 py-2">
+        {/* Leyenda de estados */}
+<div className="max-w-[1320px] mx-auto mb-2">
+  <div className="flex flex-wrap items-center gap-3 text-xs">
+    <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-100">
+      <span className="h-2 w-2 rounded-full bg-red-500" aria-hidden="true"></span>
+      Vencido
+    </span>
+    <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100">
+      <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden="true"></span>
+      Próximo a vencer (≤ 3 meses)
+    </span>
+    <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-gray-50 text-gray-700 border border-gray-200">
+      <span className="h-2 w-2 rounded-full bg-gray-400" aria-hidden="true"></span>
+      Vigente
+    </span>
+  </div>
+</div>
+        <div className="bg-white rounded-2xl shadow-sm border px-4 pr-8 py-2 mt-3">
           <table className="w-full text-sm table-auto border-collapse">
             <colgroup>
               <col className="w-[15%]" />
@@ -955,7 +1016,14 @@ function RowWithExpand({
 
   return (
     <>
-      <tr className="border-t">
+      {(() => {
+  const status = contractStatus(r);
+  const rowBg =
+  status === 'expired' ? 'bg-red-50 border-l-4 border-l-red-200' :
+  status === 'soon'    ? 'bg-yellow-50 border-l-4 border-l-yellow-200' :
+                         '';
+  return (
+    <tr className={`border-t ${rowBg}`}>
         <td className="p-2 truncate">{r.domicilio}</td>
         <td className="p-2 truncate">{r.inquilino}</td>
         <td className="p-2 truncate">{r.contacto || "-"}</td>
@@ -1012,6 +1080,8 @@ function RowWithExpand({
           </div>
         </td>
       </tr>
+  );
+})()}
 
       {expandedId === r.id && (
         <tr className="bg-gray-50/60">
