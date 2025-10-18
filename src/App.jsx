@@ -1,33 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-
-const API_URL = "https://alquileres-sec.kevinrun12.workers.dev";
-
-/* ================== Helpers ================== */
-
-// Estado del contrato según la fecha de fin
-function contractStatus(c) {
-  const f = parseYMD(c.fin);
-  if (!f) return 'ok'; // sin fecha de fin -> sin destaque
-
-  // normalizamos hoy a medianoche
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const diffDays = Math.ceil((f - today) / (1000 * 60 * 60 * 24));
-
-  if (diffDays < 0) return 'expired';     // ya vencido
-  if (diffDays <= 92) return 'soon';      // ~3 meses
-  return 'ok';
-}
-
-
-// Formato moneda
-const fmtMoney = (n) =>
-  new Intl.NumberFormat("es-AR", {
-    style: "currency",
-    currency: "ARS",
-    maximumFractionDigits: 0,
-  }).format(Number(n || 0));
+import {
+  parseYMD,
+  toYMD,
+  fmtDateAR,
+  monthSpan,
+  monthLabelES,
+  daysInMonth,
+  addMonthsAligned,
+  nextCycleStart,
+  cycleEnd,
+  todayISO,
+  contractStatus,
+} from "./utils/dates";
+import { fmtMoney, toNumberPct, pctFromRow, fmtPctFromRow } from "./utils/formatters";
+import {
+  apiJSON,
+  loadList,
+  createOrUpdateContrato,
+  deleteContrato,
+  listAumentos,
+  createOrUpdateAum,
+  deleteAum,
+  fetchIPC,
+} from "./services/api";
 
 // Estilos de botones
 const BTN = {
@@ -43,117 +38,8 @@ const BTN = {
   md: "px-4 py-2",
 };
 
-// YYYY-MM-DD ➜ Date (local, sin desfase)
-function parseYMD(s) {
-  if (!s) return null;
-  const parts = String(s).slice(0, 10).split("-");
-  if (parts.length !== 3) return null;
-  const [y, m, d] = parts.map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d);
-}
-
-// Date/str ➜ YYYY-MM-DD
-function toYMD(x) {
-  if (!x) return "";
-  if (typeof x === "string" && x.length >= 10) return x.slice(0, 10);
-  const d = x instanceof Date ? x : parseYMD(x);
-  if (!d || isNaN(d)) return "";
-  const yy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yy}-${mm}-${dd}`;
-}
-
-// YYYY-MM-DD ➜ dd/MM/yyyy (solo reordena string)
-function fmtDateAR(x) {
-  if (!x) return "";
-  const s = String(x).slice(0, 10);
-  const [y, m, d] = s.split("-");
-  if (!y || !m || !d) return s;
-  return `${d}/${m}/${y}`;
-}
-
-const todayISO = () => toYMD(new Date());
 const PERIOD_LABEL = { M: "Mensual", B: "Bimestral", T: "Trimestral", S: "Semestral" };
 const PERIOD_MONTHS = { M: 1, B: 2, T: 3, S: 6 };
-
-// Genera una lista de YYYY-MM para [from..to] inclusive
-function monthSpan(fromYMD, toYMD) {
-  const s = parseYMD(fromYMD);
-  const e = parseYMD(toYMD);
-  const end = new Date(e.getFullYear(), e.getMonth() + 1, 0);
-  const out = [];
-  let y = s.getFullYear(),
-    m = s.getMonth();
-  while (new Date(y, m, 1) <= end) {
-    out.push(`${y}-${String(m + 1).padStart(2, "0")}`);
-    m++;
-    if (m === 12) {
-      m = 0;
-      y++;
-    }
-  }
-  return out;
-}
-
-function monthLabelES(ym) {
-  const [y, m] = ym.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("es-AR", { month: "short", year: "numeric" });
-}
-
-// Periodicidad y ciclos
-const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
-function addMonthsAligned(date, months, anchorDay) {
-  const d = new Date(date);
-  const y = d.getFullYear();
-  const m = d.getMonth() + months;
-  const first = new Date(y, m, 1);
-  const day = Math.min(anchorDay, daysInMonth(first.getFullYear(), first.getMonth()));
-  return new Date(first.getFullYear(), first.getMonth(), day);
-}
-function nextCycleStart(contractStart, periodMonths, afterDate) {
-  const start = new Date(contractStart);
-  const anchor = start.getDate();
-  let candidate = addMonthsAligned(start, periodMonths, anchor);
-  while (candidate <= afterDate) {
-    candidate = addMonthsAligned(candidate, periodMonths, anchor);
-  }
-  return candidate;
-}
-function cycleEnd(fromDate, periodMonths, anchorDay) {
-  const nextStart = addMonthsAligned(fromDate, periodMonths, anchorDay);
-  const end = new Date(nextStart);
-  end.setDate(end.getDate() - 1);
-  return end;
-}
-
-/* ---------- % helpers: evitan NaN y arreglan casos “8/03/2025” ---------- */
-
-// Convierte "7,3", "7.3", "7.3%", " 7 " a número (7.3). Devuelve NaN si no es válido.
-function toNumberPct(v) {
-  if (v == null) return NaN;
-  const s = String(v).replace("%", "").replace(",", ".").trim();
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? n : NaN;
-}
-
-// Si el porcentaje viene raro (p. ej. “8/03/2025”), lo recalculamos desde base/nuevo.
-function pctFromRow(a) {
-  let n = toNumberPct(a.porcentaje);
-  if (!Number.isFinite(n)) {
-    const base = Number(a.basePrecio || 0);
-    const nuevo = Number(a.nuevoPrecio || 0);
-    if (base > 0 && nuevo > 0) n = ((nuevo / base) - 1) * 100;
-  }
-  return n;
-}
-
-function fmtPctFromRow(a) {
-  const n = pctFromRow(a);
-  return Number.isFinite(n) ? `${n.toFixed(2)}%` : "-";
-}
-
 /* ================== App ================== */
 
 export default function App() {
@@ -194,19 +80,11 @@ const [statusFilter, setStatusFilter] = useState('all');
     showToast._t = window.setTimeout(() => setToast((t) => ({ ...t, show: false })), ms);
   }
 
-  /* -------- API base -------- */
-  async function apiJSON(url) {
-    const res = await fetch(url, { cache: "no-store" });
-    const data = await res.json();
-    if (data.error || data.ok === false) throw new Error(data.error || "Error");
-    return data;
-  }
-
+  /* -------- API base (delegado a src/services/api.js) -------- */
   async function load() {
     setLoading(true);
     try {
-      const data = await apiJSON(`${API_URL}?action=list`);
-      const list = data.items || [];
+      const list = await loadList();
       setItems(list);
       const lp = {};
       for (const c of list) lp[c.id] = Number(c.lastPrecio ?? c.precioMensual ?? 0);
@@ -217,28 +95,6 @@ const [statusFilter, setStatusFilter] = useState('all');
     } finally {
       setLoading(false);
     }
-  }
-
-  async function createOrUpdateContrato(payload) {
-    const action = payload.id ? "update" : "create";
-    return apiJSON(`${API_URL}?action=${action}&item=${encodeURIComponent(JSON.stringify(payload))}`);
-  }
-  async function deleteContrato(id) {
-    return apiJSON(`${API_URL}?action=delete&id=${encodeURIComponent(id)}`);
-  }
-
-  async function listAumentos(contratoId) {
-    const { items } = await apiJSON(
-      `${API_URL}?action=listAum&contratoId=${encodeURIComponent(contratoId)}`
-    );
-    return items || [];
-  }
-  async function createOrUpdateAum(payload) {
-    const action = payload.id ? "updateAum" : "createAum";
-    return apiJSON(`${API_URL}?action=${action}&item=${encodeURIComponent(JSON.stringify(payload))}`);
-  }
-  async function deleteAum(id) {
-    return apiJSON(`${API_URL}?action=deleteAum&id=${encodeURIComponent(id)}`);
   }
 
   useEffect(() => { load(); }, []);
