@@ -98,8 +98,8 @@ export default function ContractPanel({
             <div>
               <h2 className="text-xl font-semibold">{title}</h2>
               {editing.id && (
-                <p className="text-sm text-gray-500">
-                  ID: {editing.id.slice(0, 8)}…
+                <p className="text-sm text-gray-500 break-all">
+                  ID: {editing.id}
                 </p>
               )}
             </div>
