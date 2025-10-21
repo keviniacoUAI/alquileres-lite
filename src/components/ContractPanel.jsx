@@ -346,9 +346,9 @@ export default function ContractPanel({
                           />
                         </label>
                         <label className="flex flex-col gap-1">
-                          <span className="text-sm text-gray-600">
-                            Precio vigente desde
-                          </span>
+                        <span className="text-sm text-gray-600">
+                          Ultimo precio desde
+                        </span>
                           <input
                             readOnly
                             value={
