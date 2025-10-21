@@ -23,7 +23,7 @@ import {
   listPagos,
   createOrUpdatePago,
   deletePago as deletePagoRequest,
-  fetchPaymentStatus,
+  fetchPaymentStatuses,
 } from "../services/api";
 import { PERIOD_MONTHS } from "../constants/ui";
 import { useToast } from "./useToast";
@@ -57,6 +57,7 @@ export function useContractsPage() {
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [paymentFilter, setPaymentFilter] = useState("all");
   const [editing, setEditing] = useState(null);
 
   const [aumByContrato, setAumByContrato] = useState({});
@@ -69,6 +70,7 @@ export function useContractsPage() {
 
   const [lastPrice, setLastPrice] = useState({});
   const [lastPriceSince, setLastPriceSince] = useState({});
+  const [currentPrice, setCurrentPrice] = useState({});
   const [paymentsByContrato, setPaymentsByContrato] = useState({});
   const [paymentsLoading, setPaymentsLoading] = useState({});
   const [paymentsError, setPaymentsError] = useState({});
@@ -80,6 +82,8 @@ export function useContractsPage() {
   const [editingMode, setEditingMode] = useState(null);
   const [paymentStatus, setPaymentStatus] = useState({});
   const [paymentSummary, setPaymentSummary] = useState({});
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const currentPeriod = useMemo(() => toMonthKey(todayISO()), []);
 
@@ -129,9 +133,13 @@ export function useContractsPage() {
       const aumentos = aumByContrato[contrato.id] || [];
       const price = priceAtDate(contrato, aumentos, due);
       if (price > 0) return price;
+      if (periodo === currentPeriod) {
+        const snapshot = currentPrice[contrato.id];
+        if (snapshot != null) return ensureNumber(snapshot);
+      }
       return ensureNumber(lastPrice[contrato.id] ?? contrato.precioMensual ?? 0);
     },
-    [aumByContrato, lastPrice, priceAtDate]
+    [aumByContrato, lastPrice, currentPrice, currentPeriod, priceAtDate]
   );
 
   const updatePaymentStatusFor = useCallback(
@@ -288,13 +296,16 @@ export function useContractsPage() {
       const list = await loadList();
       setItems(list);
       const lp = {};
+      const cp = {};
       const lpSince = {};
       for (const c of list) {
         lp[c.id] = Number(c.lastPrecio ?? c.precioMensual ?? 0);
-        const fallback = c.ultimaActualizacion || c.inicio || "";
+        cp[c.id] = Number(c.currentPrecio ?? c.lastPrecio ?? c.precioMensual ?? 0);
+        const fallback = c.currentPrecioDesde || c.ultimaActualizacion || c.inicio || "";
         lpSince[c.id] = toYMD(fallback);
       }
       setLastPrice(lp);
+      setCurrentPrice(cp);
       setLastPriceSince(lpSince);
     } catch (e) {
       console.error(e);
@@ -309,7 +320,18 @@ export function useContractsPage() {
   }, [load]);
 
   useEffect(() => {
+    setCurrentPage(1);
+  }, [query, statusFilter, paymentFilter]);
+
+  useEffect(() => {
     if (!items.length) {
+      setPaymentStatus({});
+      setPaymentSummary({});
+      return;
+    }
+
+    const ids = items.map((contrato) => contrato.id).filter(Boolean);
+    if (!ids.length) {
       setPaymentStatus({});
       setPaymentSummary({});
       return;
@@ -317,47 +339,53 @@ export function useContractsPage() {
 
     let cancelled = false;
 
-    (async () => {
-      const pending = {};
-      items.forEach((contrato) => {
-        pending[contrato.id] = paymentStatus[contrato.id] ?? 'pending';
-      });
-      setPaymentStatus(pending);
+    const loadingMap = {};
+    ids.forEach((id) => {
+      loadingMap[id] = "loading";
+    });
+    setPaymentStatus(loadingMap);
 
+    (async () => {
       try {
-        const results = await Promise.allSettled(
-          items.map(async (contrato) => {
-            const summary = await fetchPaymentStatus(contrato.id);
-            return { contratoId: contrato.id, summary };
-          })
-        );
+        const { items: summaries = {} } = await fetchPaymentStatuses(ids, currentPeriod);
         if (cancelled) return;
 
-        const nextSummary = { ...paymentSummary };
-        const nextStatus = { ...pending };
-        results.forEach((result) => {
-          if (result.status !== 'fulfilled') return;
-          const { contratoId, summary } = result.value;
-          const total = ensureNumber(summary?.total);
-          const pagado = ensureNumber(summary?.pagado);
-          const saldo = ensureNumber(
-            summary?.saldo != null ? summary.saldo : Math.max(total - pagado, 0)
-          );
-          nextSummary[contratoId] = { total, pagado, saldo };
-          nextStatus[contratoId] = computePaymentStatus(total, pagado, saldo);
+        const nextSummary = {};
+        const nextStatus = {};
+
+        ids.forEach((id) => {
+          const summary = summaries?.[id];
+          if (summary) {
+            const total = ensureNumber(summary.total);
+            const pagado = ensureNumber(summary.pagado);
+            const saldo = ensureNumber(
+              summary.saldo != null ? summary.saldo : Math.max(total - pagado, 0)
+            );
+            nextSummary[id] = { total, pagado, saldo };
+            nextStatus[id] = summary.status || computePaymentStatus(total, pagado, saldo);
+          } else {
+            nextSummary[id] = { total: 0, pagado: 0, saldo: 0 };
+            nextStatus[id] = "unknown";
+          }
         });
 
         setPaymentSummary(nextSummary);
         setPaymentStatus(nextStatus);
       } catch (err) {
         console.error(err);
+        if (cancelled) return;
+        const fallback = {};
+        ids.forEach((id) => {
+          fallback[id] = "unknown";
+        });
+        setPaymentStatus(fallback);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [items, fetchPaymentStatus, computePaymentStatus, paymentStatus, paymentSummary]);
+  }, [items, currentPeriod, computePaymentStatus]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
@@ -367,16 +395,74 @@ export function useContractsPage() {
       String(r.inquilino || "").toLowerCase().includes(q)
     );
 
-    if (statusFilter === "all") return byText;
+    const byContractStatus = statusFilter === "all"
+      ? byText
+      : byText.filter((c) => {
+        const st = contractStatus(c);
+        if (statusFilter === "expired") return st === "expired";
+        if (statusFilter === "soon") return st === "soon";
+        if (statusFilter === "active_or_soon") return st === "soon" || st === "ok";
+        return true;
+      });
 
-    return byText.filter((c) => {
-      const st = contractStatus(c);
-      if (statusFilter === "expired") return st === "expired";
-      if (statusFilter === "soon") return st === "soon";
-      if (statusFilter === "active_or_soon") return st === "soon" || st === "ok";
+    if (paymentFilter === "all") return byContractStatus;
+
+    return byContractStatus.filter((c) => {
+      const st = paymentStatus[c.id] || "unknown";
+      if (paymentFilter === "paid") return st === "paid";
+      if (paymentFilter === "partial") return st === "partial";
+      if (paymentFilter === "pending") return st === "pending";
+      if (paymentFilter === "unknown") return st === "unknown" || st === "loading";
       return true;
     });
-  }, [items, query, statusFilter]);
+  }, [items, query, statusFilter, paymentFilter, paymentStatus]);
+
+  const totalPages = useMemo(() => {
+    const total = filtered.length;
+    if (total <= 0) return 1;
+    const size = Math.max(1, Number(pageSize) || 1);
+    return Math.max(1, Math.ceil(total / size));
+  }, [filtered.length, pageSize]);
+
+  useEffect(() => {
+    setCurrentPage((prev) => {
+      const max = totalPages || 1;
+      if (prev < 1) return 1;
+      if (prev > max) return max;
+      return prev;
+    });
+  }, [totalPages]);
+
+  const paginated = useMemo(() => {
+    if (!filtered.length) return [];
+    const size = Math.max(1, Number(pageSize) || 1);
+    const total = filtered.length;
+    const start = (currentPage - 1) * size;
+    const maxStart = Math.max(0, Math.min(start, Math.max(total - size, 0)));
+    return filtered.slice(maxStart, maxStart + size);
+  }, [filtered, currentPage, pageSize]);
+
+  const setPage = useCallback(
+    (page) => {
+      if (page == null) return;
+      const numeric = Number(page);
+      if (!Number.isFinite(numeric)) return;
+      setCurrentPage((prev) => {
+        const floored = Math.floor(numeric);
+        const max = totalPages || 1;
+        const bounded = Math.min(Math.max(floored || 1, 1), max);
+        return bounded;
+      });
+    },
+    [totalPages]
+  );
+
+  const changePageSize = useCallback((size) => {
+    const numeric = Number(size);
+    const next = Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 10;
+    setPageSize(next);
+    setCurrentPage(1);
+  }, []);
 
   const startNew = useCallback(() => {
     setEditingMode("create");
@@ -892,9 +978,11 @@ export function useContractsPage() {
     // data
     items,
     filtered,
+    paginated,
     loading,
     query,
     statusFilter,
+    paymentFilter,
     editing,
     editingMode,
     aumByContrato,
@@ -905,6 +993,7 @@ export function useContractsPage() {
     aumError,
     lastPrice,
     lastPriceSince,
+    currentPrice,
     paymentsByContrato,
     paymentsLoading,
     paymentsError,
@@ -915,10 +1004,15 @@ export function useContractsPage() {
     menuRef,
     saving,
     toast,
+    pageSize,
+    currentPage,
+    totalPages,
+    currentPeriod,
     // constants & helpers
     // setters / actions
     setQuery,
     setStatusFilter,
+    setPaymentFilter,
     setEditing,
     setEditingMode,
     setOpenMenuId,
@@ -926,6 +1020,8 @@ export function useContractsPage() {
     setEditingPago,
     showToast,
     hideToast,
+    setPage,
+    setPageSize: changePageSize,
     startNew,
     startEdit,
     startView,

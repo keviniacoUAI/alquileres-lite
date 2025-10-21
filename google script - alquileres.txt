@@ -65,6 +65,62 @@ function toYM(x) {
   return iso ? iso.slice(0, 7) : '';
 }
 
+function currentPeriodYM() {
+  const now = new Date();
+  return now.getFullYear() + '-' + pad(now.getMonth() + 1);
+}
+
+function uniqueIds(list) {
+  const out = [];
+  const seen = {};
+  (list || []).forEach((value) => {
+    const key = String(value || '').trim();
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    out.push(key);
+  });
+  return out;
+}
+
+function parseIdsParam(value) {
+  if (value == null) return [];
+  if (Array.isArray(value)) return uniqueIds(value);
+  const text = String(value).trim();
+  if (!text) return [];
+  if (text[0] === '[' && text[text.length - 1] === ']') {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return uniqueIds(parsed);
+    } catch (err) {
+      // ignore parsing error, fallback to splitting
+    }
+  }
+  return uniqueIds(text.split(/[\s,;]+/));
+}
+
+function nextBusinessDay(date) {
+  const base = date instanceof Date ? new Date(date) : new Date(date);
+  if (!base || isNaN(base.getTime())) return null;
+  const adjusted = new Date(base);
+  let weekday = adjusted.getDay();
+  while (weekday === 0 || weekday === 6) {
+    adjusted.setDate(adjusted.getDate() + 1);
+    weekday = adjusted.getDay();
+  }
+  return adjusted;
+}
+
+function paymentDueDate(periodo, day) {
+  if (!periodo) return '';
+  const parts = String(periodo).slice(0, 7).split('-');
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!y || !m) return '';
+  const base = new Date(y, m - 1, Number(day || 10));
+  const adjusted = nextBusinessDay(base);
+  return adjusted ? toYMD(adjusted) : '';
+}
+
 function normalizeRow(header, row){
   const out = {};
   for (let i=0;i<header.length;i++){
@@ -164,6 +220,10 @@ function doGet(e) {
   if (action === 'deleteaum') return out(removeAumData(e.parameter.id), cb);
 
   if (action === 'listpagos')  return out(listPagosData(e.parameter.contratoId), cb);
+  if (action === 'statuspagos') {
+    const idsParam = e.parameter.ids || e.parameter.id || e.parameter.contratoId || e.parameter.contratoid;
+    return out(statusPagosData(idsParam, e.parameter.periodo || e.parameter.period), cb);
+  }
   if (action === 'estadopago') return out(statePagoData(e.parameter.contratoId), cb);
   if (action === 'createpago') return out(createPagoData(parseItemParam(e)), cb);
   if (action === 'updatepago') return out(updatePagoData(parseItemParam(e)), cb);
@@ -185,17 +245,46 @@ function listData(){
   const aValues = aLastRow ? sha.getRange(1,1,aLastRow,aLastCol).getValues() : [[]];
   const [hA, ...rowsA] = aValues;
   const idxA = Object.fromEntries(hA.map((h,i)=>[h,i]));
+  const today = new Date();
+  today.setHours(0,0,0,0);
   const lastByContrato = {}; // contratoId -> {ts, precio}
+  const aumentosByContrato = {};
 
-  rowsA.forEach(r => {
-    const cid = String(r[idxA.contratoId] || '').trim();
+  rowsA.forEach((r) => {
+    const cid = String(r[idxA.contratoId] || "").trim();
     if (!cid) return;
     const np = Number(r[idxA.nuevoPrecio] || 0);
-    const hasta = r[idxA.hasta] ? new Date(toYMD(r[idxA.hasta])) : new Date(0);
-    const ts = hasta.getTime() || (r[idxA.createdAt] ? new Date(r[idxA.createdAt]).getTime() : 0);
+    const desdeStr = toYMD(r[idxA.desde]);
+    const hastaStr = toYMD(r[idxA.hasta]);
+    const hastaDate = hastaStr ? new Date(hastaStr) : new Date(0);
+    const ts =
+      hastaDate.getTime() ||
+      (r[idxA.createdAt] ? new Date(r[idxA.createdAt]).getTime() : 0);
     if (!lastByContrato[cid] || ts > lastByContrato[cid].ts) {
       lastByContrato[cid] = { ts, precio: np };
     }
+    if (!aumentosByContrato[cid]) aumentosByContrato[cid] = [];
+    aumentosByContrato[cid].push({
+      desde: desdeStr,
+      hasta: hastaStr,
+      precio: np,
+    });
+  });
+
+  const currentByContrato = {};
+  Object.keys(aumentosByContrato).forEach((cid) => {
+    const list = aumentosByContrato[cid];
+    let best = null;
+    list.forEach((entry) => {
+      if (!entry.desde) return;
+      const desdeDate = new Date(entry.desde);
+      if (isNaN(desdeDate.getTime())) return;
+      if (desdeDate > today) return;
+      if (!best || desdeDate > best.date) {
+        best = { date: desdeDate, precio: entry.precio, desde: entry.desde };
+      }
+    });
+    if (best) currentByContrato[cid] = best;
   });
 
   const items = rows
@@ -205,6 +294,14 @@ function listData(){
       const base = Number(obj.precioMensual || 0);
       const lp = lastByContrato[obj.id]?.precio;
       obj.lastPrecio = (lp != null && !isNaN(lp)) ? lp : base;
+      const currentInfo = currentByContrato[obj.id];
+      if (currentInfo && Number.isFinite(currentInfo.precio)) {
+        obj.currentPrecio = currentInfo.precio;
+        obj.currentPrecioDesde = currentInfo.desde || obj.inicio || '';
+      } else {
+        obj.currentPrecio = base;
+        obj.currentPrecioDesde = obj.inicio || '';
+      }
       return obj;
     });
 
@@ -424,44 +521,140 @@ function paymentStatusFor(contratoId, periodo) {
   return out;
 }
 
-function statePagoData(contratoId) {
-  if (!contratoId) return { status: 'unknown' };
-  const keyId = String(contratoId).trim();
-  const cacheKey = `${CACHE_NS}:${keyId}`;
-  const cached = cache().get(cacheKey);
-  if (cached) {
-    try { return JSON.parse(cached); } catch {}
-  }
+function statusPagosData(idsParam, periodoParam) {
+  const ids = uniqueIds(Array.isArray(idsParam) ? idsParam : parseIdsParam(idsParam));
+  const periodo = toYM(periodoParam || currentPeriodYM()) || currentPeriodYM();
+  if (!ids.length) return { periodo, items: {} };
 
-  const now = new Date();
-  const periodo = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const cacheSvc = cache();
+  const cacheKeys = ids.map((id) => `${CACHE_NS}:status:${periodo}:${id}`);
+  const cachedEntries = cacheSvc.getAll(cacheKeys);
+  const results = {};
+  const missing = [];
 
-  let { total, pagado, saldo, vencimiento } = paymentStatusFor(contratoId, periodo);
+  ids.forEach((id, idx) => {
+    const cacheKey = cacheKeys[idx];
+    const cached = cachedEntries && cachedEntries[cacheKey];
+    if (cached) {
+      try {
+        results[id] = JSON.parse(cached);
+        return;
+      } catch (err) {
+        // cache corrupt, recompute
+      }
+    }
+    missing.push({ id, cacheKey });
+  });
 
-  if (!total) {
+  if (missing.length) {
+    const shp = sheetPagos();
+    const lastRow = shp.getLastRow();
+    const lastCol = shp.getLastColumn();
+    let rows = [];
+    let header = [];
+    if (lastRow >= 2) {
+      const values = shp.getRange(1, 1, lastRow, lastCol).getValues();
+      header = values[0] || [];
+      rows = values.slice(1);
+    }
+    const idx = Object.fromEntries((header || []).map((h, i) => [h, i]));
+    const colContrato = idx.contratoId;
+    const colPeriodo = idx.periodo;
+    const colFechaPago = idx.fechaPago;
+    const colMonto = idx.monto;
+    const colTotal = idx.montoTotal != null ? idx.montoTotal : idx.total;
+    const colVenc = idx.vencimiento;
+
+    const targetIds = new Set(missing.map((m) => m.id));
+    const aggregated = {};
+
+    if (rows.length && colContrato != null) {
+      rows.forEach((row) => {
+        const contratoId = String(row[colContrato] || '').trim();
+        if (!contratoId || !targetIds.has(contratoId)) return;
+
+        const periodoValue =
+          colPeriodo != null ? row[colPeriodo] : (colFechaPago != null ? row[colFechaPago] : '');
+        const currentPeriodo = toYM(periodoValue);
+        if (currentPeriodo !== periodo) return;
+
+        const entry = aggregated[contratoId] || { total: 0, pagado: 0, vencimiento: '' };
+        if (!entry.vencimiento) {
+          const venc = colVenc != null ? row[colVenc] : null;
+          const fecha = colFechaPago != null ? row[colFechaPago] : null;
+          entry.vencimiento = toYMD(venc || fecha);
+        }
+        if (colTotal != null) {
+          const maybeTotal = Number(row[colTotal] || 0);
+          if (Number.isFinite(maybeTotal) && maybeTotal > entry.total) {
+            entry.total = maybeTotal;
+          }
+        }
+        if (colMonto != null) {
+          entry.pagado += Number(row[colMonto] || 0);
+        }
+        aggregated[contratoId] = entry;
+      });
+    }
+
+    // fallback totals desde contratos
+    let contractLookup = {};
     const shContratos = sheet();
-    const lr = shContratos.getLastRow(), lc = shContratos.getLastColumn();
-    if (lr >= 2) {
-      const values = shContratos.getRange(1,1,lr,lc).getValues();
-      const [header, ...rows] = values;
-      const idx = Object.fromEntries(header.map((h,i)=>[h,i]));
-      const row = rows.find(r => String(r[idx.id]) === keyId);
-      if (row) total = Number(row[idx.precioMensual] || 0);
+    const lastRowContratos = shContratos.getLastRow();
+    if (lastRowContratos >= 2) {
+      const valuesC = shContratos
+        .getRange(1, 1, lastRowContratos, shContratos.getLastColumn())
+        .getValues();
+      const [headerC, ...rowsC] = valuesC;
+      const idxC = Object.fromEntries((headerC || []).map((h, i) => [h, i]));
+      const colId = idxC.id;
+      const colPrecio = idxC.precioMensual;
+      if (colId != null && colPrecio != null) {
+        contractLookup = rowsC.reduce((acc, row) => {
+          const id = String(row[colId] || '').trim();
+          if (!id) return acc;
+          acc[id] = Number(row[colPrecio] || 0);
+          return acc;
+        }, {});
+      }
+    }
+
+    const cacheEntries = {};
+    missing.forEach(({ id, cacheKey }) => {
+      const base = aggregated[id] || { total: 0, pagado: 0, vencimiento: '' };
+      let total = Number(base.total || 0);
+      const pagado = Number(base.pagado || 0);
+      if (!total) total = Number(contractLookup[id] || 0);
+      const saldo = Math.max(total - pagado, 0);
+      const vencimiento = base.vencimiento || paymentDueDate(periodo);
+      let status = 'pending';
+      if (saldo <= 0 && total > 0) status = 'paid';
+      else if (pagado > 0) status = 'partial';
+      const payload = { status, periodo, total, pagado, saldo, vencimiento };
+      results[id] = payload;
+      cacheEntries[cacheKey] = JSON.stringify(payload);
+    });
+
+    if (Object.keys(cacheEntries).length) {
+      cacheSvc.putAll(cacheEntries, CACHE_TTL_SECS);
     }
   }
 
-  if (!vencimiento) {
-    try { vencimiento = paymentDueDate(periodo); } catch {}
-  }
-
-  if (!Number.isFinite(saldo)) saldo = Math.max(total - pagado, 0);
-
-  let status = 'pending';
-  if (saldo <= 0 && total > 0) status = 'paid';
-  else if (pagado > 0) status = 'partial';
-
-  const result = { status, periodo, total, pagado, saldo, vencimiento };
-  cache().put(cacheKey, JSON.stringify(result), CACHE_TTL_SECS);
-  return result;
+  return { periodo, items: results };
 }
 
+function statePagoData(contratoId) {
+  const keyId = String(contratoId || '').trim();
+  if (!keyId) return { status: 'unknown' };
+  const periodo = currentPeriodYM();
+  const { items } = statusPagosData([keyId], periodo);
+  if (items && items[keyId]) return items[keyId];
+  return {
+    status: 'pending',
+    periodo,
+    total: 0,
+    pagado: 0,
+    saldo: 0,
+    vencimiento: paymentDueDate(periodo),
+  };
+}

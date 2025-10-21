@@ -54,6 +54,41 @@ export function monthLabelES(ym) {
 
 export const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
 
+export function addDays(value, amount) {
+  const base = value instanceof Date ? new Date(value) : parseYMD(value);
+  if (!base || Number.isNaN(base.getTime())) return null;
+  base.setDate(base.getDate() + amount);
+  return base;
+}
+
+export function dayAfter(ymd) {
+  const next = addDays(ymd, 1);
+  return next ? toYMD(next) : "";
+}
+
+export function nextBusinessDay(date) {
+  const base = date instanceof Date ? new Date(date) : parseYMD(date);
+  if (!base || Number.isNaN(base.getTime())) return null;
+  const adjusted = new Date(base);
+  let day = adjusted.getDay();
+  while (day === 0 || day === 6) {
+    adjusted.setDate(adjusted.getDate() + 1);
+    day = adjusted.getDay();
+  }
+  return adjusted;
+}
+
+export function paymentDueDate(periodo, day = 10) {
+  if (!periodo) return "";
+  const [yStr, mStr] = String(periodo).slice(0, 7).split("-");
+  const y = Number(yStr);
+  const m = Number(mStr);
+  if (!y || !m) return "";
+  const base = new Date(y, m - 1, day);
+  const adjusted = nextBusinessDay(base);
+  return adjusted ? toYMD(adjusted) : "";
+}
+
 export function addMonthsAligned(date, months, anchorDay) {
   const d = new Date(date);
   const y = d.getFullYear();

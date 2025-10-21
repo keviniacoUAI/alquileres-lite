@@ -1,0 +1,210 @@
+// === Cloudflare Worker: proxy firmado + CORS + IPC ===
+// ⚠️ Reemplazá si tu /exec cambiara:
+const GAS_URL =
+  "https://script.google.com/macros/s/AKfycbyL6EAZFs6l9_w6Reo1XBOkt7vfKr9I_yiHOGE8Z5ACobL28uaVZtEh-THo7deapYkITg/exec";
+
+// Orígenes permitidos (¡sin barra al final!)
+const ORIGIN_WHITELIST = new Set([
+  "https://keviniacouai.github.io", // GitHub Pages
+  "http://localhost:5173",          // Vite dev
+  // "https://alquileres.tudominio.com",
+]);
+
+function corsHeaders(origin) {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+    "Cache-Control": "no-store",
+    Vary: "Origin",
+  };
+}
+
+async function hmacBase64(str, secret) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(str)
+  );
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+
+function unwrapJSONP(text) {
+  const m = text.match(/^[\w$]+\((.*)\);?$/s);
+  return m ? m[1] : text;
+}
+
+export default {
+  async fetch(request, env) {
+    const origin = request.headers.get("Origin") || "";
+    const allowOrigin = ORIGIN_WHITELIST.has(origin) ? origin : "";
+
+    // Preflight CORS
+    if (request.method === "OPTIONS") {
+      if (!allowOrigin && origin) return new Response(null, { status: 403 });
+      return new Response(null, {
+        headers: corsHeaders(allowOrigin || origin),
+      });
+    }
+
+    // Solo GET/POST
+    if (!["GET", "POST"].includes(request.method)) {
+      return new Response(JSON.stringify({ error: "method_not_allowed" }), {
+        status: 405,
+        headers: {
+          "Content-Type": "application/json",
+          ...(origin ? corsHeaders(allowOrigin || origin) : {}),
+        },
+      });
+    }
+
+    // CORS: si hay Origin y no está permitido → 403
+    if (origin && !allowOrigin) {
+      return new Response(JSON.stringify({ error: "forbidden_origin" }), {
+        status: 403,
+        headers: {
+          "Content-Type": "application/json",
+          ...(origin ? corsHeaders(origin) : {}),
+        },
+      });
+    }
+
+    // Parámetros combinando query + body JSON (POST)
+    const url = new URL(request.url);
+    const params = new URLSearchParams(url.search);
+    if (request.method === "POST") {
+      const data = await request.json().catch(() => ({}));
+      for (const k of Object.keys(data)) {
+        const v =
+          typeof data[k] === "object" ? JSON.stringify(data[k]) : String(data[k]);
+        params.set(k, v);
+      }
+    }
+
+    const rawAction = params.get("action") || "";
+    const action = rawAction.toLowerCase();
+
+    // === ACCIÓN ESPECIAL: IPC (Argenstats) ===
+    if (action === "ipc") {
+      // Validar fechas
+      const from = params.get("from") || "";
+      const to   = params.get("to") || "";
+      const iso = /^\d{4}-\d{2}-\d{2}$/;
+      if (!iso.test(from) || !iso.test(to)) {
+        return respondJSON({ success: false, error: "bad_date_params" }, 400, origin, allowOrigin);
+      }
+
+      // Endpoint de Argenstats
+      const apiUrl = `https://argenstats.com/api/v1/inflation?view=historical&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+
+      try {
+        // API key desde secreto del Worker
+        // ⚠️ Cargá tu API key en Cloudflare: Settings → Variables → Add → "ARGEN_API_KEY"
+        const apiKey = env.ARGEN_API_KEY;
+        if (!apiKey) {
+          return respondJSON({ success:false, error: "server_misconfigured" }, 500, origin, allowOrigin);
+        }
+
+        const res = await fetch(apiUrl, {
+          headers: { "x-api-key": apiKey },
+          // nunca caches IPC
+          cf: { cacheTtl: 0, cacheEverything: false },
+        });
+
+        const text = await res.text();
+        let json;
+        try { json = JSON.parse(text); } catch { json = { success:false, error:"invalid_json_from_ipc" }; }
+
+        // Propagar 4xx/5xx como están (para que el front muestre “Error IPC (400)” etc.)
+        return new Response(JSON.stringify(json), {
+          status: res.status,
+          headers: {
+            "Content-Type": "application/json",
+            ...(origin ? corsHeaders(allowOrigin || origin) : {}),
+          },
+        });
+      } catch (err) {
+        return respondJSON({ success:false, error: "ipc_fetch_failed" }, 502, origin, allowOrigin);
+      }
+    }
+
+    // === Acciones de Sheets vía GAS ===
+const ALLOWED = [
+  "list", "get", "create", "update", "delete",
+  "listaum", "createaum", "updateaum", "deleteaum",
+  "listpagos", "createpago", "updatepago", "deletepago",
+  "statuspagos",
+];
+    if (!ALLOWED.includes(action)) {
+      return respondJSON({ error: "unknown_action" }, 400, origin, allowOrigin);
+    }
+
+    // Firma HMAC para GAS
+    const ts = Date.now().toString();
+    const nonce = crypto.randomUUID();
+    let payload = "";
+
+    if (action === "get" || action === "delete" || action === "deleteaum" || action === "deletepago") {
+      payload = params.get("id") || "";
+    } else if (
+      action === "create" || action === "update" ||
+      action === "createaum" || action === "updateaum" ||
+      action === "createpago" || action === "updatepago"
+    ) {
+      payload = params.get("item") || "";
+  } else if (action === "listaum" || action === "listpagos") {
+      payload = params.get("contratoId") || params.get("contratoid") || "";
+  } else if (action === "statuspagos") {
+      payload =
+        params.get("ids") ||
+        params.get("contratoId") ||
+        params.get("contratoid") ||
+        "";
+    } // list => payload vacío
+
+    const writeSecret = env.WRITE_SECRET;
+    if (!writeSecret) {
+      return respondJSON({ error: "server_misconfigured" }, 500, origin, allowOrigin);
+    }
+
+    const base = `${action}|${payload}|${ts}|${nonce}`;
+    const sig = await hmacBase64(base, writeSecret);
+
+    params.set("ts", ts);
+    params.set("nonce", nonce);
+    params.set("sig", sig);
+    params.set("action", action);
+
+    // Proxy a Apps Script (acepta JSONP o JSON)
+    const target = `${GAS_URL}?${params.toString()}`;
+    const res = await fetch(target, { cf: { cacheTtl: 0, cacheEverything: false } });
+    const txt = await res.text();
+    const body = unwrapJSONP(txt);
+
+    return new Response(body, {
+      status: res.status,
+      headers: {
+        "Content-Type": "application/json",
+        ...(origin ? corsHeaders(allowOrigin || origin) : {}),
+      },
+    });
+  },
+};
+
+function respondJSON(obj, status, origin, allowOrigin) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...(origin ? corsHeaders(allowOrigin || origin) : {}),
+    },
+  });
+}

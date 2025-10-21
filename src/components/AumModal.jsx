@@ -14,7 +14,7 @@ export default function AumModal({
 }) {
   if (!editingAum) return null;
   return (
-    <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-40">
       <form onSubmit={onSubmit} className="bg-white w-full max-w-xl rounded-2xl shadow-xl border p-6 grid grid-cols-2 gap-4">
         <h2 className="col-span-2 text-xl font-semibold">
           {editingAum.id ? "Editar aumento" : "Nuevo aumento"}
@@ -76,3 +76,4 @@ export default function AumModal({
     </div>
   );
 }
+

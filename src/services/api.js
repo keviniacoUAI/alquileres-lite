@@ -53,8 +53,18 @@ export async function deletePago(id) {
   return apiJSON(`${API_URL}?action=deletePago&id=${encodeURIComponent(id)}`);
 }
 
-export async function fetchPaymentStatus(contratoId) {
-  return apiJSON(`${API_URL}?action=estadoPago&contratoId=${encodeURIComponent(contratoId)}`);
+export async function fetchPaymentStatuses(contratoIds, periodo) {
+  const ids = Array.isArray(contratoIds) ? contratoIds.filter(Boolean) : [];
+  const params = new URLSearchParams({ action: "statuspagos" });
+  if (ids.length) params.set("ids", ids.join(","));
+  if (periodo) params.set("periodo", periodo);
+  return apiJSON(`${API_URL}?${params.toString()}`);
+}
+
+export async function fetchPaymentStatus(contratoId, periodo) {
+  if (!contratoId) return null;
+  const { items } = await fetchPaymentStatuses([contratoId], periodo);
+  return items ? items[String(contratoId)] : null;
 }
 
 export async function fetchIPC(fromYMD, toYMD) {

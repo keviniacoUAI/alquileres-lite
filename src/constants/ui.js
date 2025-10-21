@@ -15,6 +15,7 @@ export const PERIOD_LABELS = Object.freeze({
   M: "Mensual",
   B: "Bimestral",
   T: "Trimestral",
+  Q: "Cuatrimestral",
   S: "Semestral",
 });
 
@@ -22,5 +23,6 @@ export const PERIOD_MONTHS = Object.freeze({
   M: 1,
   B: 2,
   T: 3,
+  Q: 4,
   S: 6,
 });
