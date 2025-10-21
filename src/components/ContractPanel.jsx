@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { fmtDateAR, toYMD } from "../utils/dates";
 import { fmtMoney } from "../utils/formatters";
 import { BUTTON_STYLES } from "../constants/ui";
@@ -10,6 +10,7 @@ const TAB_LABELS = Object.freeze({
 });
 
 const TABS_ORDER = ["info", "increases", "payments"];
+const PANEL_BODY_HEIGHT = 640;
 
 export default function ContractPanel({
   editing,
@@ -27,26 +28,11 @@ export default function ContractPanel({
   currentMonthlyTotal,
 }) {
   const [activeTab, setActiveTab] = useState("info");
-  const contentRef = useRef(null);
-  const [minContentHeight, setMinContentHeight] = useState(520);
 
   useEffect(() => {
     setActiveTab("info");
   }, [editing?.id]);
 
-  useEffect(() => {
-    if (!contentRef.current) return;
-    const measured = contentRef.current.scrollHeight;
-    if (Number.isFinite(measured) && measured > 0) {
-      setMinContentHeight((prev) => (measured > prev ? measured : prev));
-    }
-  }, [
-    activeTab,
-    editing?.id,
-    currentMonthlyTotal,
-    lastPriceValue,
-    lastPriceSince,
-  ]);
 
   const canShowTabs = Boolean(editing?.id);
 
@@ -152,17 +138,17 @@ export default function ContractPanel({
           </div>
         </nav>
 
-        <div
-          ref={contentRef}
-          className="flex-1 overflow-y-auto px-6 py-4"
-          style={{ minHeight: `${minContentHeight}px` }}
-        >
-          {isActive("info") && (
-            <form
-              onSubmit={handleSubmit}
-              className="flex flex-col gap-6 pb-10"
-              autoComplete="off"
-            >
+        <div className="flex-1 px-6 py-4">
+          <div
+            className={`w-full ${isActive("info") ? "flex flex-col" : "hidden"}`}
+            style={{ height: PANEL_BODY_HEIGHT }}
+          >
+            <div className="flex-1 overflow-y-auto pr-1">
+              <form
+                onSubmit={handleSubmit}
+                className="flex flex-col gap-6 pb-10 min-h-full"
+                autoComplete="off"
+              >
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
                   Datos generales
@@ -344,26 +330,37 @@ export default function ContractPanel({
                   </button>
                 </div>
               )}
-            </form>
-          )}
+              </form>
+            </div>
+          </div>
 
           {canShowTabs && isActive("increases") && (
-            <div className="min-h-full">
-              {increasesSlot || (
-                <p className="text-sm text-gray-500">
-                  Selecciona un contrato con aumentos cargados para ver el detalle.
-                </p>
-              )}
+            <div
+              className="flex flex-col"
+              style={{ height: PANEL_BODY_HEIGHT }}
+            >
+              <div className="flex-1 overflow-y-auto pr-1">
+                {increasesSlot || (
+                  <p className="text-sm text-gray-500">
+                    Selecciona un contrato con aumentos cargados para ver el detalle.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
           {canShowTabs && isActive("payments") && (
-            <div className="min-h-full">
-              {paymentsSlot || (
-                <p className="text-sm text-gray-500">
-                  Selecciona un contrato con pagos cargados para ver el detalle.
-                </p>
-              )}
+            <div
+              className="flex flex-col"
+              style={{ height: PANEL_BODY_HEIGHT }}
+            >
+              <div className="flex-1 overflow-y-auto pr-1">
+                {paymentsSlot || (
+                  <p className="text-sm text-gray-500">
+                    Selecciona un contrato con pagos cargados para ver el detalle.
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>
