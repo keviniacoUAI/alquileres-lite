@@ -37,12 +37,34 @@ export async function deleteAum(id) {
   return apiJSON(`${API_URL}?action=deleteAum&id=${encodeURIComponent(id)}`);
 }
 
+export async function listPagos(contratoId) {
+  const { items } = await apiJSON(
+    `${API_URL}?action=listPagos&contratoId=${encodeURIComponent(contratoId)}`
+  );
+  return items || [];
+}
+
+export async function createOrUpdatePago(payload) {
+  const action = payload.id ? "updatePago" : "createPago";
+  return apiJSON(`${API_URL}?action=${action}&item=${encodeURIComponent(JSON.stringify(payload))}`);
+}
+
+export async function deletePago(id) {
+  return apiJSON(`${API_URL}?action=deletePago&id=${encodeURIComponent(id)}`);
+}
+
+export async function fetchPaymentStatus(contratoId) {
+  return apiJSON(`${API_URL}?action=estadoPago&contratoId=${encodeURIComponent(contratoId)}`);
+}
+
 export async function fetchIPC(fromYMD, toYMD) {
   const url = `${API_URL}?action=ipc&from=${encodeURIComponent(fromYMD)}&to=${encodeURIComponent(toYMD)}`;
   const res = await fetch(url, { cache: "no-store" });
 
   let payload = null;
-  try { payload = await res.json(); } catch {}
+  try { payload = await res.json(); } catch {
+    // Las respuestas vacías o no JSON se ignoran silenciosamente.
+  }
 
   const toMsg = (p, fallback) => {
     if (!p) return fallback;

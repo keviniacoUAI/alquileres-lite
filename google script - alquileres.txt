@@ -1,0 +1,467 @@
+/************ CONFIG ************/
+const SHEET_CONTRATOS = 'Contratos';
+const SHEET_AUMENTOS  = 'Aumentos';
+const SHEET_PAGOS     = 'Pagos';
+const CACHE_NS        = 'b431f9ba59f6468e2bf5fb66610e07866ae4985e007859a209c415934c93200b';
+const CACHE_TTL_SECS  = 300;
+
+const HEADER_CONTRATOS = ['id','domicilio','inquilino','contacto','inicio','fin','precioMensual','aumento','periodicidad','ultimaActualizacion','notas'];
+const HEADER_AUMENTOS  = ['id','contratoId','desde','hasta','porcentaje','nuevoPrecio','nota','createdAt'];
+const HEADER_PAGOS     = ['id','contratoId','periodo','fechaPago','monto','metodo','nota','createdAt','updatedAt'];
+
+/************ Helpers ************/
+function ensureSheet(name, header) {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+  }
+  const curr = sh.getRange(1, 1, 1, header.length).getValues()[0];
+  const mismatch = header.some((h, i) => curr[i] !== h);
+  if (mismatch) {
+    sh.getRange(1, 1, 1, header.length).setValues([header]);
+  }
+  return sh;
+}
+
+function sheet() { return ensureSheet(SHEET_CONTRATOS, HEADER_CONTRATOS); }
+function sheetAum() { return ensureSheet(SHEET_AUMENTOS, HEADER_AUMENTOS); }
+function sheetPagos() { return ensureSheet(SHEET_PAGOS, HEADER_PAGOS); }
+
+function pad(n){ return String(n).padStart(2,'0'); }
+
+function toYMD(x){
+  if (!x) return '';
+  if (x instanceof Date){
+    return x.getFullYear() + '-' + pad(x.getMonth()+1) + '-' + pad(x.getDate());
+  }
+  if (typeof x === 'string'){
+    const s = x.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (m){
+      const d = +m[1], mo = +m[2], y = +m[3];
+      if (mo>=1 && mo<=12 && d>=1 && d<=31) return y + '-' + pad(mo) + '-' + pad(d);
+    }
+    m = s.match(/^(\d{4})[\/\.\-](\d{1,2})[\/\.\-](\d{1,2})$/);
+    if (m){
+      const y = +m[1], mo = +m[2], d = +m[3];
+      if (mo>=1 && mo<=12 && d>=1 && d<=31) return y + '-' + pad(mo) + '-' + pad(d);
+    }
+  }
+  const d = new Date(x);
+  return isNaN(d) ? '' : (d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()));
+}
+
+function toYM(x) {
+  if (!x) return '';
+  if (typeof x === 'string') {
+    const s = x.trim();
+    if (/^\d{4}-\d{2}$/.test(s)) return s;
+    const iso = toYMD(s);
+    return iso ? iso.slice(0, 7) : s.slice(0, 7);
+  }
+  const iso = toYMD(x);
+  return iso ? iso.slice(0, 7) : '';
+}
+
+function normalizeRow(header, row){
+  const out = {};
+  for (let i=0;i<header.length;i++){
+    const h = header[i], v = row[i];
+    if (h === 'inicio' || h === 'fin' || h === 'ultimaActualizacion'){
+      out[h] = toYMD(v);
+    } else {
+      out[h] = (v === undefined || v === null) ? '' : v;
+    }
+  }
+  return out;
+}
+
+function forceText(x) {
+  if (x === undefined || x === null) return '';
+  const s = String(x).trim();
+  return /^\d/.test(s) ? "'" + s : s; // evita que Sheets lo transforme en fecha
+}
+
+function asCellContrato(h, v) {
+  if (h === 'inicio' || h === 'fin' || h === 'ultimaActualizacion') return toYMD(v);
+  if (h === 'precioMensual') return v ?? '';
+  return forceText(v);
+}
+
+function asCellAum(h, v) {
+  if (h === 'desde' || h === 'hasta') return toYMD(v);
+  if (h === 'nuevoPrecio' || h === 'basePrecio') return v ?? '';
+  if (h === 'porcentaje') return forceText(v); // <-- clave
+  return forceText(v);
+}
+
+function asCellPago(h, v) {
+  if (h === 'periodo') return toYM(v);
+  if (h === 'fechaPago' || h === 'createdAt' || h === 'updatedAt') return toYMD(v);
+  if (h === 'monto') return v ?? '';
+  return forceText(v);
+}
+
+function ensureHeader() {
+  sheet();
+  sheetAum();
+  sheetPagos();
+}
+
+function validateContrato(item){
+  const i = toYMD(item.inicio);
+  const f = toYMD(item.fin);
+  if (i && f && new Date(i) > new Date(f)) return 'inicio no puede ser mayor a fin';
+  if (i) item.inicio = i;
+  if (f) item.fin = f;
+  return null;
+}
+
+function json(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function out(obj, callback) {
+  const text = JSON.stringify(obj);
+  if (callback) {
+    return ContentService
+      .createTextOutput(`${callback}(${text});`)
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService
+    .createTextOutput(text)
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function parseItemParam(e) {
+  try { return e.parameter.item ? JSON.parse(e.parameter.item) : null; }
+  catch { return null; }
+}
+
+function cache() {
+  return CacheService.getScriptCache();
+}
+
+/************ Router ************/
+function doGet(e) {
+  ensureHeader();
+  const action = (e.parameter.action || 'list').toLowerCase();
+  const cb = e.parameter.callback || null;
+
+  if (action === 'list')      return out(listData(), cb);
+
+  if (action === 'get')       return out(getByIdData(e.parameter.id), cb);
+  if (action === 'create')    return out(createData(parseItemParam(e)), cb);
+  if (action === 'update')    return out(updateData(parseItemParam(e)), cb);
+  if (action === 'delete')    return out(removeData(e.parameter.id), cb);
+
+  if (action === 'listaum')   return out(listAumData(e.parameter.contratoId), cb);
+  if (action === 'createaum') return out(createAumData(parseItemParam(e)), cb);
+  if (action === 'updateaum') return out(updateAumData(parseItemParam(e)), cb);
+  if (action === 'deleteaum') return out(removeAumData(e.parameter.id), cb);
+
+  if (action === 'listpagos')  return out(listPagosData(e.parameter.contratoId), cb);
+  if (action === 'estadopago') return out(statePagoData(e.parameter.contratoId), cb);
+  if (action === 'createpago') return out(createPagoData(parseItemParam(e)), cb);
+  if (action === 'updatepago') return out(updatePagoData(parseItemParam(e)), cb);
+  if (action === 'deletepago') return out(removePagoData(e.parameter.id), cb);
+
+  return out({ ok:false, error:'Action not found' }, cb);
+}
+
+/************ Contratos ************/
+function listData(){
+  const sh = sheet();
+  const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+  const values = lastRow ? sh.getRange(1,1,lastRow,lastCol).getValues() : [[]];
+  const [header, ...rows] = values;
+
+  // Calcular último precio por contrato leyendo Aumentos UNA vez
+  const sha = sheetAum();
+  const aLastRow = sha.getLastRow(), aLastCol = sha.getLastColumn();
+  const aValues = aLastRow ? sha.getRange(1,1,aLastRow,aLastCol).getValues() : [[]];
+  const [hA, ...rowsA] = aValues;
+  const idxA = Object.fromEntries(hA.map((h,i)=>[h,i]));
+  const lastByContrato = {}; // contratoId -> {ts, precio}
+
+  rowsA.forEach(r => {
+    const cid = String(r[idxA.contratoId] || '').trim();
+    if (!cid) return;
+    const np = Number(r[idxA.nuevoPrecio] || 0);
+    const hasta = r[idxA.hasta] ? new Date(toYMD(r[idxA.hasta])) : new Date(0);
+    const ts = hasta.getTime() || (r[idxA.createdAt] ? new Date(r[idxA.createdAt]).getTime() : 0);
+    if (!lastByContrato[cid] || ts > lastByContrato[cid].ts) {
+      lastByContrato[cid] = { ts, precio: np };
+    }
+  });
+
+  const items = rows
+    .filter(r => r[0])
+    .map(r => {
+      const obj = normalizeRow(header, r);
+      const base = Number(obj.precioMensual || 0);
+      const lp = lastByContrato[obj.id]?.precio;
+      obj.lastPrecio = (lp != null && !isNaN(lp)) ? lp : base;
+      return obj;
+    });
+
+  return { items };
+}
+
+function getByIdData(id){
+  const sh = sheet();
+  const lr = sh.getLastRow(), lc = sh.getLastColumn();
+  if (!lr) return { item:null };
+  const values = sh.getRange(1,1,lr,lc).getValues();
+  const [header, ...rows] = values;
+  const row = rows.find(r => String(r[0]) === String(id));
+  return { item: row ? normalizeRow(header, row) : null };
+}
+
+function createData(item){
+  if (!item) return { ok:false, error:'Bad item' };
+  const err = validateContrato(item); if (err) return { ok:false, error:err };
+  const sh = sheet();
+  const header = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  item.id = item.id || String(Date.now());
+  const row = header.map(h => asCellContrato(h, item[h]));
+  sh.appendRow(row);
+  return { ok:true, id:item.id };
+}
+
+// ► update más rápido: localizar fila por ID con TextFinder
+function updateData(item){
+  if (!item || !item.id) return { ok:false, error:'Bad item' };
+  const err = validateContrato(item); if (err) return { ok:false, error:err };
+  const sh = sheet();
+  const finder = sh.getRange('A:A').createTextFinder(String(item.id)).matchEntireCell(true).findNext();
+  if (!finder) return { ok:false, error:'Not found' };
+  const rowNum = finder.getRow();
+  const header = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  const prev = sh.getRange(rowNum,1,1,header.length).getValues()[0];
+  const idx = Object.fromEntries(header.map((h,i)=>[h,i]));
+  const merged = header.map(h => (item[h] !== undefined) ? asCellContrato(h, item[h]) : prev[idx[h]]);
+  sh.getRange(rowNum, 1, 1, merged.length).setValues([merged]);
+  return { ok:true };
+}
+
+// ► delete más rápido: localizar fila por ID con TextFinder
+function removeData(id) {
+  const sh = sheet();
+  const finder = sh.getRange('A:A').createTextFinder(String(id)).matchEntireCell(true).findNext();
+  if (!finder) return { ok:false, error:'Not found' };
+  sh.deleteRow(finder.getRow());
+  return { ok:true };
+}
+
+/************ Aumentos ************/
+function listAumData(contratoId){
+  const sha = sheetAum();
+  const lr = sha.getLastRow(), lc = sha.getLastColumn();
+  if (!lr) return { items: [] };
+  const values = sha.getRange(1,1,lr,lc).getValues();
+  const [h, ...rows] = values;
+  const idx = Object.fromEntries(h.map((x,i)=>[x,i]));
+  const items = rows
+    .filter(r => r[idx.contratoId] && String(r[idx.contratoId]) === String(contratoId))
+    .map(r => {
+      const o = {};
+      h.forEach((key, i) => {
+        if (key === 'desde' || key === 'hasta') o[key] = toYMD(r[i]);
+        else o[key] = r[i] ?? '';
+      });
+      return o;
+    });
+  items.sort((a,b) => new Date(a.hasta) - new Date(b.hasta));
+  return { items };
+}
+
+function createAumData(item){
+  if (!item) return { ok:false, error:'Bad item' };
+  const sha = sheetAum();
+  const header = sha.getRange(1,1,1,sha.getLastColumn()).getValues()[0];
+  item.id = item.id || String(Date.now());
+  item.createdAt = item.createdAt || new Date();
+  const row = header.map(h => asCellAum(h, item[h]));
+  sha.appendRow(row);
+  return { ok:true, id:item.id };
+}
+
+function updateAumData(item){
+  if (!item || !item.id) return { ok:false, error:'Bad item' };
+  const sha = sheetAum();
+  const finder = sha.getRange('A:A').createTextFinder(String(item.id)).matchEntireCell(true).findNext();
+  if (!finder) return { ok:false, error:'Not found' };
+  const rowNum = finder.getRow();
+  const header = sha.getRange(1,1,1,sha.getLastColumn()).getValues()[0];
+  const prev = sha.getRange(rowNum,1,1,header.length).getValues()[0];
+  const idx = Object.fromEntries(header.map((h,i)=>[h,i]));
+  const merged = header.map(h => (item[h] !== undefined) ? asCellAum(h, item[h]) : prev[idx[h]]);
+  sha.getRange(rowNum, 1, 1, merged.length).setValues([merged]);
+  return { ok:true };
+}
+
+function removeAumData(id){
+  const sha = sheetAum();
+  const finder = sha.getRange('A:A').createTextFinder(String(id)).matchEntireCell(true).findNext();
+  if (!finder) return { ok:false, error:'Not found' };
+  sha.deleteRow(finder.getRow());
+  return { ok:true };
+}
+
+/************ Pagos ************/
+function listPagosData(contratoId){
+  const shp = sheetPagos();
+  const lastRow = shp.getLastRow(), lastCol = shp.getLastColumn();
+  if (lastRow < 2) return { items: [] };
+  const values = shp.getRange(1, 1, lastRow, lastCol).getValues();
+  const [header, ...rows] = values;
+  const idx = Object.fromEntries(header.map((h,i)=>[h,i]));
+  const target = contratoId ? String(contratoId).trim() : '';
+
+  const items = rows
+    .filter(r => r[idx.id])
+    .filter(r => !target || String(r[idx.contratoId] || '').trim() === target)
+    .map(r => {
+      const o = {};
+      header.forEach((key, colIdx) => {
+        const val = r[colIdx];
+        if (key === 'periodo') {
+          o[key] = toYM(val);
+        } else if (key === 'fechaPago' || key === 'createdAt' || key === 'updatedAt') {
+          o[key] = toYMD(val);
+        } else if (key === 'monto') {
+          o[key] = Number(val || 0);
+        } else {
+          o[key] = val ?? '';
+        }
+      });
+      if (!o.periodo) o.periodo = toYM(o.fechaPago);
+      return o;
+    });
+
+  items.sort((a, b) => {
+    const p = (a.periodo || '').localeCompare(b.periodo || '');
+    if (p !== 0) return p;
+    return (a.fechaPago || '').localeCompare(b.fechaPago || '');
+  });
+
+  return { items };
+}
+
+function createPagoData(item){
+  if (!item) return { ok:false, error:'Bad item' };
+  if (!item.contratoId) return { ok:false, error:'contratoId requerido' };
+  const shp = sheetPagos();
+  const now = new Date();
+  item.id = item.id || String(Date.now());
+  item.periodo = toYM(item.periodo || item.fechaPago || now);
+  item.fechaPago = toYMD(item.fechaPago || now);
+  item.monto = Number(item.monto ?? 0) || 0;
+  item.createdAt = toYMD(item.createdAt || now);
+  item.updatedAt = toYMD(now);
+  const row = HEADER_PAGOS.map((h) => asCellPago(h, item[h]));
+  shp.appendRow(row);
+  return { ok:true, id:item.id };
+}
+
+function updatePagoData(item){
+  if (!item || !item.id) return { ok:false, error:'Bad item' };
+  const shp = sheetPagos();
+  const finder = shp.getRange('A:A').createTextFinder(String(item.id)).matchEntireCell(true).findNext();
+  if (!finder) return { ok:false, error:'Not found' };
+  const rowNum = finder.getRow();
+  const header = HEADER_PAGOS;
+  const prev = shp.getRange(rowNum, 1, 1, header.length).getValues()[0];
+  const idx = Object.fromEntries(header.map((h,i)=>[h,i]));
+
+  if (item.periodo !== undefined) item.periodo = toYM(item.periodo || prev[idx.periodo]);
+  if (item.fechaPago !== undefined) item.fechaPago = toYMD(item.fechaPago || prev[idx.fechaPago]);
+  if (item.monto !== undefined) item.monto = Number(item.monto ?? 0) || 0;
+  item.updatedAt = toYMD(new Date());
+
+  const merged = header.map((h) => {
+    if (item[h] !== undefined) return asCellPago(h, item[h]);
+    return prev[idx[h]];
+  });
+
+  shp.getRange(rowNum, 1, 1, header.length).setValues([merged]);
+  return { ok:true };
+}
+
+function removePagoData(id){
+  const shp = sheetPagos();
+  const finder = shp.getRange('A:A').createTextFinder(String(id)).matchEntireCell(true).findNext();
+  if (!finder) return { ok:false, error:'Not found' };
+  shp.deleteRow(finder.getRow());
+  return { ok:true };
+}
+
+function paymentStatusFor(contratoId, periodo) {
+  const shp = sheetPagos();
+  const lastRow = shp.getLastRow(), lastCol = shp.getLastColumn();
+  const out = { total: 0, pagado: 0, saldo: 0, vencimiento: '' };
+  if (lastRow < 2) return out;
+  const values = shp.getRange(1,1,lastRow,lastCol).getValues();
+  const [header, ...rows] = values;
+  const idx = Object.fromEntries(header.map((h,i)=>[h,i]));
+  const target = String(contratoId).trim();
+
+  rows
+    .filter(r => String(r[idx.contratoId] || '').trim() === target)
+    .forEach(r => {
+      const currentPeriodo = toYM(r[idx.periodo] || r[idx.fechaPago]);
+      if (currentPeriodo !== periodo) return;
+      if (!out.vencimiento) out.vencimiento = toYMD(r[idx.vencimiento] || r[idx.fechaPago]);
+      const maybeTotal = Number(r[idx.montoTotal] || r[idx.total] || 0);
+      if (maybeTotal > out.total) out.total = maybeTotal;
+      out.pagado += Number(r[idx.monto] || 0);
+    });
+
+  return out;
+}
+
+function statePagoData(contratoId) {
+  if (!contratoId) return { status: 'unknown' };
+  const keyId = String(contratoId).trim();
+  const cacheKey = `${CACHE_NS}:${keyId}`;
+  const cached = cache().get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch {}
+  }
+
+  const now = new Date();
+  const periodo = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+  let { total, pagado, saldo, vencimiento } = paymentStatusFor(contratoId, periodo);
+
+  if (!total) {
+    const shContratos = sheet();
+    const lr = shContratos.getLastRow(), lc = shContratos.getLastColumn();
+    if (lr >= 2) {
+      const values = shContratos.getRange(1,1,lr,lc).getValues();
+      const [header, ...rows] = values;
+      const idx = Object.fromEntries(header.map((h,i)=>[h,i]));
+      const row = rows.find(r => String(r[idx.id]) === keyId);
+      if (row) total = Number(row[idx.precioMensual] || 0);
+    }
+  }
+
+  if (!vencimiento) {
+    try { vencimiento = paymentDueDate(periodo); } catch {}
+  }
+
+  if (!Number.isFinite(saldo)) saldo = Math.max(total - pagado, 0);
+
+  let status = 'pending';
+  if (saldo <= 0 && total > 0) status = 'paid';
+  else if (pagado > 0) status = 'partial';
+
+  const result = { status, periodo, total, pagado, saldo, vencimiento };
+  cache().put(cacheKey, JSON.stringify(result), CACHE_TTL_SECS);
+  return result;
+}
+
