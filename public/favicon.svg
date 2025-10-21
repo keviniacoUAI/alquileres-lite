@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Icono de alquiler</title>
+  <rect x="4" y="24" width="56" height="32" rx="6" fill="#1d4ed8" />
+  <path d="M8 26L32 8l24 18v4H8z" fill="#2563eb" />
+  <rect x="20" y="36" width="12" height="20" fill="#f8fafc" />
+  <circle cx="44" cy="40" r="8" fill="#f97316" />
+  <rect x="44" y="36" width="14" height="4" rx="2" fill="#fb923c" />
+  <rect x="50" y="36" width="4" height="10" rx="1.5" fill="#fb923c" />
+  <circle cx="44" cy="40" r="3" fill="#1d4ed8" />
+</svg>
