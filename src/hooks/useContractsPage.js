@@ -7,8 +7,12 @@ import { useContractAumentos } from "./contracts/useContractAumentos";
 import { useContractsEditor } from "./contracts/useContractsEditor";
 import { useContractsMenu } from "./contracts/useContractsMenu";
 import { useContractsDerived } from "./contracts/useContractsDerived";
+import { useApiEnv } from "../context/ApiEnvContext";
 
 export function useContractsPage() {
+  const { current } = useApiEnv();
+  const environmentId = current?.id || "default";
+
   const { toast, showToast, hideToast } = useToast();
   const data = useContractsData({ showToast });
 
@@ -25,6 +29,7 @@ export function useContractsPage() {
     showToast,
     saving,
     setSaving,
+    environmentId,
   });
 
   const payments = useContractPayments({
@@ -34,12 +39,12 @@ export function useContractsPage() {
     currentPrice: data.currentPrice,
     lastPrice: data.lastPrice,
     showToast,
+    environmentId,
   });
 
   const editor = useContractsEditor({
     items: data.items,
     setItems: data.setItems,
-    lastPrice: data.lastPrice,
     setLastPrice: data.setLastPrice,
     setLastPriceSince: data.setLastPriceSince,
     setCurrentPrice: data.setCurrentPrice,
@@ -50,7 +55,13 @@ export function useContractsPage() {
     setOpenMenuId: menu.setOpenMenuId,
     showToast,
     setSaving,
+    environmentId,
   });
+
+  const setMenuOpenId = menu.setOpenMenuId;
+  const setPagoEditing = payments.setEditingPago;
+  const setAumentoEditing = aumentos.setEditingAum;
+  const cancelEdit = editor.cancelEdit;
 
   const derived = useContractsDerived({
     items: data.items,
@@ -73,6 +84,19 @@ export function useContractsPage() {
     loadPayments(contrato);
     loadAumentos(contrato);
   }, [editor.editing, loadPayments, loadAumentos]);
+
+  useEffect(() => {
+    cancelEdit();
+    setMenuOpenId(null);
+    setPagoEditing(null);
+    setAumentoEditing(null);
+  }, [
+    cancelEdit,
+    environmentId,
+    setAumentoEditing,
+    setMenuOpenId,
+    setPagoEditing,
+  ]);
 
   return {
     items: data.items,

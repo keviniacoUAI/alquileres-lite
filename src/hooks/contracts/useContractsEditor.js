@@ -1,11 +1,10 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createOrUpdateContrato, deleteContrato } from "../../services/api";
 import { parseYMD, toYMD, todayISO } from "../../utils/dates";
 
 export function useContractsEditor({
   items,
   setItems,
-  lastPrice,
   setLastPrice,
   setLastPriceSince,
   setCurrentPrice,
@@ -16,9 +15,15 @@ export function useContractsEditor({
   setOpenMenuId,
   showToast,
   setSaving,
+  environmentId = "default",
 }) {
   const [editing, setEditing] = useState(null);
   const [editingMode, setEditingMode] = useState(null);
+
+  useEffect(() => {
+    setEditing(null);
+    setEditingMode(null);
+  }, [environmentId]);
 
   const startNew = useCallback(() => {
     setEditingMode("create");
@@ -128,14 +133,14 @@ export function useContractsEditor({
       }
     },
     [
+      aumByContrato,
       editing,
       items,
+      resolvePriceStart,
+      setCurrentPrice,
       setItems,
       setLastPrice,
       setLastPriceSince,
-      setCurrentPrice,
-      resolvePriceStart,
-      aumByContrato,
       setSaving,
       showToast,
     ],
@@ -179,12 +184,12 @@ export function useContractsEditor({
       }
     },
     [
-      setOpenMenuId,
-      setSaving,
+      setCurrentPrice,
       setItems,
       setLastPrice,
-      setCurrentPrice,
       setLastPriceSince,
+      setOpenMenuId,
+      setSaving,
       showToast,
     ],
   );

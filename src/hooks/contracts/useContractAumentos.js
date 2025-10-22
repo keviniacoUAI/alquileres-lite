@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   listAumentos,
   createOrUpdateAum,
@@ -27,6 +27,7 @@ export function useContractAumentos({
   showToast,
   saving,
   setSaving,
+  environmentId = "default",
 }) {
   const [aumByContrato, setAumByContrato] = useState({});
   const [editingAum, setEditingAum] = useState(null);
@@ -34,6 +35,20 @@ export function useContractAumentos({
   const [aumLoadingList, setAumLoadingList] = useState({});
   const [aumCalculating, setAumCalculating] = useState({});
   const [aumError, setAumError] = useState({});
+  const environmentRef = useRef(environmentId);
+
+  useEffect(() => {
+    environmentRef.current = environmentId;
+  }, [environmentId]);
+
+  useEffect(() => {
+    setAumByContrato({});
+    setEditingAum(null);
+    setDeletingAumId(null);
+    setAumLoadingList({});
+    setAumCalculating({});
+    setAumError({});
+  }, [environmentId]);
 
   const resolvePriceStart = useCallback((contrato, aumentos) => {
     if (!contrato) return "";
@@ -78,6 +93,7 @@ export function useContractAumentos({
       setAumError((state) => ({ ...state, [id]: null }));
       try {
         const itemsList = await listAumentos(id);
+        if (environmentRef.current !== environmentId) return;
         setAumByContrato((state) => ({ ...state, [id]: itemsList }));
         setLastPriceSince((state) => ({
           ...state,
@@ -87,18 +103,22 @@ export function useContractAumentos({
         setCurrentPrice((state) => ({ ...state, [id]: actualPrice }));
       } catch (err) {
         console.error(err);
+        if (environmentRef.current !== environmentId) return;
         setAumError((state) => ({
           ...state,
           [id]: "No se pudieron cargar aumentos",
         }));
         if (showToast) showToast("No se pudieron cargar aumentos", "error");
       } finally {
-        setAumLoadingList((state) => ({ ...state, [id]: false }));
+        if (environmentRef.current === environmentId) {
+          setAumLoadingList((state) => ({ ...state, [id]: false }));
+        }
       }
     },
     [
       aumByContrato,
       computeCurrentPrice,
+      environmentId,
       resolvePriceStart,
       setCurrentPrice,
       setLastPriceSince,
@@ -201,6 +221,7 @@ export function useContractAumentos({
         setAumCalculating((state) => ({ ...state, [contrato.id]: true }));
 
         const ipcMap = await fetchIPC(desdeYMD, hastaYMD);
+        if (environmentRef.current !== environmentId) return;
         const meses = monthSpan(desdeYMD, hastaYMD);
         if (!meses.length)
           throw new Error("Rango de meses inválido para el cálculo");
@@ -262,10 +283,12 @@ export function useContractAumentos({
         if (showToast)
           showToast(err.message || "No se pudo calcular el IPC", "error");
       } finally {
-        setAumCalculating((state) => ({ ...state, [contrato.id]: false }));
+        if (environmentRef.current === environmentId) {
+          setAumCalculating((state) => ({ ...state, [contrato.id]: false }));
+        }
       }
     },
-    [aumByContrato, lastPrice, showToast],
+    [aumByContrato, environmentId, lastPrice, showToast],
   );
 
   const handlePorcentajeChange = useCallback((event) => {
@@ -333,11 +356,13 @@ export function useContractAumentos({
         };
 
         await createOrUpdateAum(payload);
+        if (environmentRef.current !== environmentId) return;
         setAumLoadingList((state) => ({
           ...state,
           [editingAum.contratoId]: true,
         }));
         const itemsAums = await listAumentos(editingAum.contratoId);
+        if (environmentRef.current !== environmentId) return;
         setAumByContrato((state) => ({
           ...state,
           [editingAum.contratoId]: itemsAums,
@@ -367,12 +392,15 @@ export function useContractAumentos({
         if (showToast)
           showToast(err.message || "Error guardando aumento", "error");
       } finally {
-        setSaving(false);
+        if (environmentRef.current === environmentId) {
+          setSaving(false);
+        }
       }
     },
     [
       computeCurrentPrice,
       editingAum,
+      environmentId,
       items,
       resolvePriceStart,
       setCurrentPrice,
@@ -396,12 +424,14 @@ export function useContractAumentos({
         setSaving(true);
 
         await deleteAum(aumento.id);
+        if (environmentRef.current !== environmentId) return;
 
         setAumLoadingList((state) => ({
           ...state,
           [aumento.contratoId]: true,
         }));
         const itemsAum = await listAumentos(aumento.contratoId);
+        if (environmentRef.current !== environmentId) return;
         setAumByContrato((state) => ({
           ...state,
           [aumento.contratoId]: itemsAum,
@@ -439,12 +469,15 @@ export function useContractAumentos({
         if (showToast)
           showToast(err.message || "Error eliminando aumento", "error");
       } finally {
-        setSaving(false);
-        setDeletingAumId(null);
+        if (environmentRef.current === environmentId) {
+          setSaving(false);
+          setDeletingAumId(null);
+        }
       }
     },
     [
       computeCurrentPrice,
+      environmentId,
       items,
       resolvePriceStart,
       setCurrentPrice,

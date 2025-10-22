@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   listPagos,
   createOrUpdatePago,
@@ -15,6 +15,7 @@ export function useContractPayments({
   currentPrice,
   lastPrice,
   showToast,
+  environmentId = "default",
 }) {
   const [paymentsByContrato, setPaymentsByContrato] = useState({});
   const [paymentsLoading, setPaymentsLoading] = useState({});
@@ -23,6 +24,20 @@ export function useContractPayments({
   const [paymentSummary, setPaymentSummary] = useState({});
   const [editingPago, setEditingPago] = useState(null);
   const [savingPago, setSavingPago] = useState(false);
+  const environmentRef = useRef(environmentId);
+
+  useEffect(() => {
+    environmentRef.current = environmentId;
+  }, [environmentId]);
+
+  useEffect(() => {
+    setPaymentsByContrato({});
+    setPaymentsLoading({});
+    setPaymentsError({});
+    setPaymentStatus({});
+    setPaymentSummary({});
+    setEditingPago(null);
+  }, [environmentId]);
 
   const computePaymentStatus = useCallback((total, pagado, saldo) => {
     const effectiveTotal = ensureNumber(total);
@@ -182,11 +197,13 @@ export function useContractPayments({
       setPaymentsError((state) => ({ ...state, [id]: null }));
       try {
         const itemsList = await listPagos(id);
+        if (environmentRef.current !== environmentId) return;
         const normalized = normalizePayments(contrato, itemsList);
         setPaymentsByContrato((state) => ({ ...state, [id]: normalized }));
         updatePaymentStatusFor(contrato, normalized.months);
       } catch (err) {
         console.error(err);
+        if (environmentRef.current !== environmentId) return;
         setPaymentsError((state) => ({
           ...state,
           [id]: err?.message || "No se pudieron cargar pagos",
@@ -194,10 +211,18 @@ export function useContractPayments({
         if (showToast)
           showToast(err?.message || "No se pudieron cargar pagos", "error");
       } finally {
-        setPaymentsLoading((state) => ({ ...state, [id]: false }));
+        if (environmentRef.current === environmentId) {
+          setPaymentsLoading((state) => ({ ...state, [id]: false }));
+        }
       }
     },
-    [normalizePayments, paymentsByContrato, showToast, updatePaymentStatusFor],
+    [
+      environmentId,
+      normalizePayments,
+      paymentsByContrato,
+      showToast,
+      updatePaymentStatusFor,
+    ],
   );
 
   const startNewPago = useCallback(
@@ -255,9 +280,11 @@ export function useContractPayments({
           ...payload,
           monto: payload.monto,
         });
+        if (environmentRef.current !== environmentId) return;
         const contrato = items.find((c) => c.id === payload.contratoId);
         if (contrato) {
           await loadPayments(contrato, { force: true });
+          if (environmentRef.current !== environmentId) return;
         }
         setEditingPago(null);
         if (showToast) showToast("Pago guardado", "success");
@@ -266,10 +293,12 @@ export function useContractPayments({
         if (showToast)
           showToast(err?.message || "Error guardando pago", "error");
       } finally {
-        setSavingPago(false);
+        if (environmentRef.current === environmentId) {
+          setSavingPago(false);
+        }
       }
     },
-    [editingPago, items, loadPayments, showToast],
+    [editingPago, environmentId, items, loadPayments, showToast],
   );
 
   const onDeletePago = useCallback(
@@ -281,9 +310,11 @@ export function useContractPayments({
       try {
         setSavingPago(true);
         await deletePagoRequest(pagoId);
+        if (environmentRef.current !== environmentId) return;
         const contrato = items.find((c) => c.id === contratoId);
         if (contrato) {
           await loadPayments(contrato, { force: true });
+          if (environmentRef.current !== environmentId) return;
         }
         if (showToast) showToast("Pago eliminado", "success");
       } catch (err) {
@@ -291,10 +322,12 @@ export function useContractPayments({
         if (showToast)
           showToast(err?.message || "Error eliminando pago", "error");
       } finally {
-        setSavingPago(false);
+        if (environmentRef.current === environmentId) {
+          setSavingPago(false);
+        }
       }
     },
-    [items, loadPayments, showToast],
+    [environmentId, items, loadPayments, showToast],
   );
 
   useEffect(() => {
@@ -365,7 +398,7 @@ export function useContractPayments({
     return () => {
       cancelled = true;
     };
-  }, [computePaymentStatus, currentPeriod, items]);
+  }, [computePaymentStatus, currentPeriod, environmentId, items]);
 
   return {
     paymentsByContrato,

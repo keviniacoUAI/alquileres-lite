@@ -1,4 +1,63 @@
-const API_URL = "https://alquileres-sec.kevinrun12.workers.dev";
+const FALLBACK_API_BASE_URL = (
+  import.meta.env.VITE_API_URL_PROD ||
+  import.meta.env.VITE_API_URL ||
+  "https://alquileres-sec.kevinrun12.workers.dev"
+).trim();
+
+let apiBaseUrl = FALLBACK_API_BASE_URL;
+
+export function getDefaultApiBaseUrl() {
+  return FALLBACK_API_BASE_URL;
+}
+
+export function getApiBaseUrl() {
+  return apiBaseUrl;
+}
+
+export function setApiBaseUrl(url) {
+  if (typeof url === "string" && url.trim()) {
+    apiBaseUrl = url.trim();
+  } else {
+    apiBaseUrl = FALLBACK_API_BASE_URL;
+  }
+  return apiBaseUrl;
+}
+
+function buildUrl(params) {
+  const base = getApiBaseUrl();
+  if (!base) {
+    throw new Error("API base URL no disponible");
+  }
+
+  let url;
+  try {
+    url = new URL(base);
+  } catch {
+    throw new Error(`API base URL inválida: ${base}`);
+  }
+
+  if (params instanceof URLSearchParams) {
+    params.forEach((value, key) => {
+      url.searchParams.set(key, value);
+    });
+  } else if (typeof params === "string") {
+    const trimmed = params.startsWith("?") ? params.slice(1) : params;
+    if (trimmed) {
+      const parsed = new URLSearchParams(trimmed);
+      parsed.forEach((value, key) => {
+        url.searchParams.set(key, value);
+      });
+    }
+  } else if (params && typeof params === "object") {
+    Object.entries(params).forEach(([key, value]) => {
+      if (value != null) {
+        url.searchParams.set(key, String(value));
+      }
+    });
+  }
+
+  return url.toString();
+}
 
 export async function apiJSON(url) {
   const res = await fetch(url, { cache: "no-store" });
@@ -7,50 +66,56 @@ export async function apiJSON(url) {
   return data;
 }
 
+function request(action, extra) {
+  const params = new URLSearchParams({ action });
+  if (extra && typeof extra === "object") {
+    Object.entries(extra).forEach(([key, value]) => {
+      if (value != null) params.set(key, String(value));
+    });
+  }
+  return apiJSON(buildUrl(params));
+}
+
 export async function loadList() {
-  const data = await apiJSON(`${API_URL}?action=list`);
+  const data = await request("list");
   return data.items || [];
 }
 
-export async function createOrUpdateContrato(payload) {
-  const action = payload.id ? "update" : "create";
-  return apiJSON(`${API_URL}?action=${action}&item=${encodeURIComponent(JSON.stringify(payload))}`);
+export function createOrUpdateContrato(payload) {
+  const action = payload?.id ? "update" : "create";
+  return request(action, { item: JSON.stringify(payload) });
 }
 
-export async function deleteContrato(id) {
-  return apiJSON(`${API_URL}?action=delete&id=${encodeURIComponent(id)}`);
+export function deleteContrato(id) {
+  return request("delete", { id });
 }
 
 export async function listAumentos(contratoId) {
-  const { items } = await apiJSON(
-    `${API_URL}?action=listAum&contratoId=${encodeURIComponent(contratoId)}`
-  );
+  const { items } = await request("listAum", { contratoId });
   return items || [];
 }
 
-export async function createOrUpdateAum(payload) {
-  const action = payload.id ? "updateAum" : "createAum";
-  return apiJSON(`${API_URL}?action=${action}&item=${encodeURIComponent(JSON.stringify(payload))}`);
+export function createOrUpdateAum(payload) {
+  const action = payload?.id ? "updateAum" : "createAum";
+  return request(action, { item: JSON.stringify(payload) });
 }
 
-export async function deleteAum(id) {
-  return apiJSON(`${API_URL}?action=deleteAum&id=${encodeURIComponent(id)}`);
+export function deleteAum(id) {
+  return request("deleteAum", { id });
 }
 
 export async function listPagos(contratoId) {
-  const { items } = await apiJSON(
-    `${API_URL}?action=listPagos&contratoId=${encodeURIComponent(contratoId)}`
-  );
+  const { items } = await request("listPagos", { contratoId });
   return items || [];
 }
 
-export async function createOrUpdatePago(payload) {
-  const action = payload.id ? "updatePago" : "createPago";
-  return apiJSON(`${API_URL}?action=${action}&item=${encodeURIComponent(JSON.stringify(payload))}`);
+export function createOrUpdatePago(payload) {
+  const action = payload?.id ? "updatePago" : "createPago";
+  return request(action, { item: JSON.stringify(payload) });
 }
 
-export async function deletePago(id) {
-  return apiJSON(`${API_URL}?action=deletePago&id=${encodeURIComponent(id)}`);
+export function deletePago(id) {
+  return request("deletePago", { id });
 }
 
 export async function fetchPaymentStatuses(contratoIds, periodo) {
@@ -58,7 +123,7 @@ export async function fetchPaymentStatuses(contratoIds, periodo) {
   const params = new URLSearchParams({ action: "statuspagos" });
   if (ids.length) params.set("ids", ids.join(","));
   if (periodo) params.set("periodo", periodo);
-  return apiJSON(`${API_URL}?${params.toString()}`);
+  return apiJSON(buildUrl(params));
 }
 
 export async function fetchPaymentStatus(contratoId, periodo) {
@@ -68,11 +133,17 @@ export async function fetchPaymentStatus(contratoId, periodo) {
 }
 
 export async function fetchIPC(fromYMD, toYMD) {
-  const url = `${API_URL}?action=ipc&from=${encodeURIComponent(fromYMD)}&to=${encodeURIComponent(toYMD)}`;
+  const url = buildUrl({
+    action: "ipc",
+    from: fromYMD,
+    to: toYMD,
+  });
   const res = await fetch(url, { cache: "no-store" });
 
   let payload = null;
-  try { payload = await res.json(); } catch {
+  try {
+    payload = await res.json();
+  } catch {
     // Las respuestas vacías o no JSON se ignoran silenciosamente.
   }
 
@@ -81,7 +152,11 @@ export async function fetchIPC(fromYMD, toYMD) {
     const cand = p.error ?? p.message ?? p.detail ?? p.reason ?? p.errors;
     if (cand == null) return fallback;
     if (typeof cand === "string") return cand;
-    try { return JSON.stringify(cand); } catch { return fallback; }
+    try {
+      return JSON.stringify(cand);
+    } catch {
+      return fallback;
+    }
   };
 
   const friendlyNoData = "No existe información en el IPC para el período consultado.";

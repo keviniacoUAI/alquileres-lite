@@ -1,12 +1,18 @@
 // === Cloudflare Worker: proxy firmado + CORS + IPC ===
-// ⚠️ Reemplazá si tu /exec cambiara:
-const GAS_URL =
+// Ajust� los endpoints por ambiente (prod/uat, etc.). Pod�s usar variables de entorno
+// GAS_URL_PROD / GAS_URL_UAT o editar el objeto GAS_ENDPOINTS.
+const DEFAULT_ENV = "prod";
+const GAS_URL_DEFAULT =
   "https://script.google.com/macros/s/AKfycbyL6EAZFs6l9_w6Reo1XBOkt7vfKr9I_yiHOGE8Z5ACobL28uaVZtEh-THo7deapYkITg/exec";
+const GAS_ENDPOINTS = {
+  prod: GAS_URL_DEFAULT,
+  uat: "", // Completar con el /exec de UAT o definir GAS_URL_UAT en las variables del Worker.
+};
 
 // Orígenes permitidos (¡sin barra al final!)
 const ORIGIN_WHITELIST = new Set([
   "https://keviniacouai.github.io", // GitHub Pages
-  "http://localhost:5173",          // Vite dev
+  "http://localhost:5173", // Vite dev
   // "https://alquileres.tudominio.com",
 ]);
 
@@ -21,18 +27,45 @@ function corsHeaders(origin) {
   };
 }
 
+function isNonEmpty(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function normalizeEnv(value) {
+  if (!value) return "";
+  return String(value).trim().toLowerCase();
+}
+
+function resolveGasUrl(activeEnv, bindings) {
+  const key = activeEnv || DEFAULT_ENV;
+  const inline = GAS_ENDPOINTS[key];
+  if (isNonEmpty(inline)) return inline.trim();
+  const envVar = bindings[`GAS_URL_${key.toUpperCase()}`] || bindings.GAS_URL;
+  if (isNonEmpty(envVar)) return String(envVar).trim();
+  if (key !== DEFAULT_ENV) return resolveGasUrl(DEFAULT_ENV, bindings);
+  return "";
+}
+
+function resolveWriteSecret(activeEnv, bindings) {
+  const scoped = bindings[`WRITE_SECRET_${activeEnv.toUpperCase()}`];
+  if (isNonEmpty(scoped)) return String(scoped).trim();
+  const shared = bindings.WRITE_SECRET;
+  if (isNonEmpty(shared)) return String(shared).trim();
+  return "";
+}
+
 async function hmacBase64(str, secret) {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
-    ["sign"]
+    ["sign"],
   );
   const sig = await crypto.subtle.sign(
     "HMAC",
     key,
-    new TextEncoder().encode(str)
+    new TextEncoder().encode(str),
   );
   return btoa(String.fromCharCode(...new Uint8Array(sig)));
 }
@@ -57,24 +90,12 @@ export default {
 
     // Solo GET/POST
     if (!["GET", "POST"].includes(request.method)) {
-      return new Response(JSON.stringify({ error: "method_not_allowed" }), {
-        status: 405,
-        headers: {
-          "Content-Type": "application/json",
-          ...(origin ? corsHeaders(allowOrigin || origin) : {}),
-        },
-      });
+      return respondJSON({ error: "method_not_allowed" }, 405, origin, allowOrigin);
     }
 
     // CORS: si hay Origin y no está permitido → 403
     if (origin && !allowOrigin) {
-      return new Response(JSON.stringify({ error: "forbidden_origin" }), {
-        status: 403,
-        headers: {
-          "Content-Type": "application/json",
-          ...(origin ? corsHeaders(origin) : {}),
-        },
-      });
+      return respondJSON({ error: "forbidden_origin" }, 403, origin, allowOrigin);
     }
 
     // Parámetros combinando query + body JSON (POST)
@@ -89,6 +110,24 @@ export default {
       }
     }
 
+    const requestedEnv = normalizeEnv(
+      params.get("env") ||
+        params.get("environment") ||
+        params.get("target"),
+    );
+    const activeEnv = requestedEnv || DEFAULT_ENV;
+    const gasUrl = resolveGasUrl(activeEnv, env);
+    if (!isNonEmpty(gasUrl)) {
+      return respondJSON(
+        { error: "server_misconfigured", detail: `GAS_URL no configurada para "${activeEnv}"` },
+        500,
+        origin,
+        allowOrigin,
+      );
+    }
+
+    params.set("env", activeEnv);
+
     const rawAction = params.get("action") || "";
     const action = rawAction.toLowerCase();
 
@@ -96,7 +135,7 @@ export default {
     if (action === "ipc") {
       // Validar fechas
       const from = params.get("from") || "";
-      const to   = params.get("to") || "";
+      const to = params.get("to") || "";
       const iso = /^\d{4}-\d{2}-\d{2}$/;
       if (!iso.test(from) || !iso.test(to)) {
         return respondJSON({ success: false, error: "bad_date_params" }, 400, origin, allowOrigin);
@@ -107,10 +146,9 @@ export default {
 
       try {
         // API key desde secreto del Worker
-        // ⚠️ Cargá tu API key en Cloudflare: Settings → Variables → Add → "ARGEN_API_KEY"
-        const apiKey = env.ARGEN_API_KEY;
+        const apiKey = env[`ARGEN_API_KEY_${activeEnv.toUpperCase()}`] || env.ARGEN_API_KEY;
         if (!apiKey) {
-          return respondJSON({ success:false, error: "server_misconfigured" }, 500, origin, allowOrigin);
+          return respondJSON({ success: false, error: "server_misconfigured" }, 500, origin, allowOrigin);
         }
 
         const res = await fetch(apiUrl, {
@@ -121,9 +159,13 @@ export default {
 
         const text = await res.text();
         let json;
-        try { json = JSON.parse(text); } catch { json = { success:false, error:"invalid_json_from_ipc" }; }
+        try {
+          json = JSON.parse(text);
+        } catch {
+          json = { success: false, error: "invalid_json_from_ipc" };
+        }
 
-        // Propagar 4xx/5xx como están (para que el front muestre “Error IPC (400)” etc.)
+        // Propagar 4xx/5xx como están (para que el front muestre "Error IPC (400)" etc.)
         return new Response(JSON.stringify(json), {
           status: res.status,
           headers: {
@@ -131,18 +173,29 @@ export default {
             ...(origin ? corsHeaders(allowOrigin || origin) : {}),
           },
         });
-      } catch (err) {
-        return respondJSON({ success:false, error: "ipc_fetch_failed" }, 502, origin, allowOrigin);
+      } catch {
+        return respondJSON({ success: false, error: "ipc_fetch_failed" }, 502, origin, allowOrigin);
       }
     }
 
     // === Acciones de Sheets vía GAS ===
-const ALLOWED = [
-  "list", "get", "create", "update", "delete",
-  "listaum", "createaum", "updateaum", "deleteaum",
-  "listpagos", "createpago", "updatepago", "deletepago",
-  "statuspagos",
-];
+    const ALLOWED = [
+      "list",
+      "get",
+      "create",
+      "update",
+      "delete",
+      "listaum",
+      "createaum",
+      "updateaum",
+      "deleteaum",
+      "listpagos",
+      "createpago",
+      "updatepago",
+      "deletepago",
+      "statuspagos",
+      "estadopago",
+    ];
     if (!ALLOWED.includes(action)) {
       return respondJSON({ error: "unknown_action" }, 400, origin, allowOrigin);
     }
@@ -155,23 +208,26 @@ const ALLOWED = [
     if (action === "get" || action === "delete" || action === "deleteaum" || action === "deletepago") {
       payload = params.get("id") || "";
     } else if (
-      action === "create" || action === "update" ||
-      action === "createaum" || action === "updateaum" ||
-      action === "createpago" || action === "updatepago"
+      action === "create" ||
+      action === "update" ||
+      action === "createaum" ||
+      action === "updateaum" ||
+      action === "createpago" ||
+      action === "updatepago"
     ) {
       payload = params.get("item") || "";
-  } else if (action === "listaum" || action === "listpagos") {
+    } else if (action === "listaum" || action === "listpagos") {
       payload = params.get("contratoId") || params.get("contratoid") || "";
-  } else if (action === "statuspagos") {
+    } else if (action === "statuspagos") {
       payload =
         params.get("ids") ||
         params.get("contratoId") ||
         params.get("contratoid") ||
         "";
-    } // list => payload vacío
+    } // list / estadopago => payload vacío
 
-    const writeSecret = env.WRITE_SECRET;
-    if (!writeSecret) {
+    const writeSecret = resolveWriteSecret(activeEnv, env);
+    if (!isNonEmpty(writeSecret)) {
       return respondJSON({ error: "server_misconfigured" }, 500, origin, allowOrigin);
     }
 
@@ -184,7 +240,7 @@ const ALLOWED = [
     params.set("action", action);
 
     // Proxy a Apps Script (acepta JSONP o JSON)
-    const target = `${GAS_URL}?${params.toString()}`;
+    const target = `${gasUrl}?${params.toString()}`;
     const res = await fetch(target, { cf: { cacheTtl: 0, cacheEverything: false } });
     const txt = await res.text();
     const body = unwrapJSONP(txt);

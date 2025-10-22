@@ -9,9 +9,79 @@ const HEADER_CONTRATOS = ['id','domicilio','inquilino','contacto','inicio','fin'
 const HEADER_AUMENTOS  = ['id','contratoId','desde','hasta','porcentaje','nuevoPrecio','nota','createdAt'];
 const HEADER_PAGOS     = ['id','contratoId','periodo','fechaPago','monto','metodo','nota','createdAt','updatedAt'];
 
+/************ Multi-entorno ************/
+// Ajust� los IDs en las propiedades del script (SPREADSHEET_ID_PROD, SPREADSHEET_ID_UAT, etc.)
+// o complet� el objeto ENV_CONFIG directamente.
+const DEFAULT_ENV = 'prod';
+const SCRIPT_PROPS = PropertiesService.getScriptProperties();
+const ENV_CONFIG = {
+  prod: {
+    spreadsheetId: (SCRIPT_PROPS.getProperty('SPREADSHEET_ID_PROD') || '').trim(),
+  },
+  uat: {
+    spreadsheetId: (SCRIPT_PROPS.getProperty('SPREADSHEET_ID_UAT') || '').trim(),
+  },
+};
+
+let runtimeEnv = DEFAULT_ENV;
+let runtimeSpreadsheet = null;
+
+function resolveEnvFromRequest(e) {
+  const raw =
+    (e && e.parameter && (e.parameter.env || e.parameter.environment || e.parameter.target)) || '';
+  const name = String(raw).trim().toLowerCase();
+  if (name && ENV_CONFIG[name]) return name;
+  return DEFAULT_ENV;
+}
+
+function openSpreadsheetForEnv(envName) {
+  const key = envName && ENV_CONFIG[envName] ? envName : DEFAULT_ENV;
+  const cfg = ENV_CONFIG[key] || {};
+  const id = (cfg.spreadsheetId || '').trim();
+  if (id) {
+    try {
+      return SpreadsheetApp.openById(id);
+    } catch (err) {
+      if (key === DEFAULT_ENV) {
+        return SpreadsheetApp.getActive();
+      }
+      throw err;
+    }
+  }
+  if (key === DEFAULT_ENV) return SpreadsheetApp.getActive();
+  throw new Error(`SpreadsheetId no configurado para el ambiente "${envName}".`);
+}
+
+function withEnvironment(envName, fn) {
+  const previousEnv = runtimeEnv;
+  const previousSpreadsheet = runtimeSpreadsheet;
+  runtimeEnv = envName;
+  runtimeSpreadsheet = openSpreadsheetForEnv(envName);
+  try {
+    return fn();
+  } finally {
+    runtimeEnv = previousEnv;
+    runtimeSpreadsheet = previousSpreadsheet;
+  }
+}
+
+function currentSpreadsheet() {
+  if (runtimeSpreadsheet) return runtimeSpreadsheet;
+  runtimeSpreadsheet = openSpreadsheetForEnv(runtimeEnv);
+  return runtimeSpreadsheet;
+}
+
+function currentEnv() {
+  return runtimeEnv || DEFAULT_ENV;
+}
+
+function cachePrefix() {
+  return `${CACHE_NS}:${currentEnv()}`;
+}
+
 /************ Helpers ************/
 function ensureSheet(name, header) {
-  const ss = SpreadsheetApp.getActive();
+  const ss = currentSpreadsheet();
   let sh = ss.getSheetByName(name);
   if (!sh) {
     sh = ss.insertSheet(name);
@@ -203,33 +273,35 @@ function cache() {
 
 /************ Router ************/
 function doGet(e) {
-  ensureHeader();
-  const action = (e.parameter.action || 'list').toLowerCase();
-  const cb = e.parameter.callback || null;
+  return withEnvironment(resolveEnvFromRequest(e), () => {
+    ensureHeader();
+    const action = (e.parameter.action || 'list').toLowerCase();
+    const cb = e.parameter.callback || null;
 
-  if (action === 'list')      return out(listData(), cb);
+    if (action === 'list')      return out(listData(), cb);
 
-  if (action === 'get')       return out(getByIdData(e.parameter.id), cb);
-  if (action === 'create')    return out(createData(parseItemParam(e)), cb);
-  if (action === 'update')    return out(updateData(parseItemParam(e)), cb);
-  if (action === 'delete')    return out(removeData(e.parameter.id), cb);
+    if (action === 'get')       return out(getByIdData(e.parameter.id), cb);
+    if (action === 'create')    return out(createData(parseItemParam(e)), cb);
+    if (action === 'update')    return out(updateData(parseItemParam(e)), cb);
+    if (action === 'delete')    return out(removeData(e.parameter.id), cb);
 
-  if (action === 'listaum')   return out(listAumData(e.parameter.contratoId), cb);
-  if (action === 'createaum') return out(createAumData(parseItemParam(e)), cb);
-  if (action === 'updateaum') return out(updateAumData(parseItemParam(e)), cb);
-  if (action === 'deleteaum') return out(removeAumData(e.parameter.id), cb);
+    if (action === 'listaum')   return out(listAumData(e.parameter.contratoId), cb);
+    if (action === 'createaum') return out(createAumData(parseItemParam(e)), cb);
+    if (action === 'updateaum') return out(updateAumData(parseItemParam(e)), cb);
+    if (action === 'deleteaum') return out(removeAumData(e.parameter.id), cb);
 
-  if (action === 'listpagos')  return out(listPagosData(e.parameter.contratoId), cb);
-  if (action === 'statuspagos') {
-    const idsParam = e.parameter.ids || e.parameter.id || e.parameter.contratoId || e.parameter.contratoid;
-    return out(statusPagosData(idsParam, e.parameter.periodo || e.parameter.period), cb);
-  }
-  if (action === 'estadopago') return out(statePagoData(e.parameter.contratoId), cb);
-  if (action === 'createpago') return out(createPagoData(parseItemParam(e)), cb);
-  if (action === 'updatepago') return out(updatePagoData(parseItemParam(e)), cb);
-  if (action === 'deletepago') return out(removePagoData(e.parameter.id), cb);
+    if (action === 'listpagos')  return out(listPagosData(e.parameter.contratoId), cb);
+    if (action === 'statuspagos') {
+      const idsParam = e.parameter.ids || e.parameter.id || e.parameter.contratoId || e.parameter.contratoid;
+      return out(statusPagosData(idsParam, e.parameter.periodo || e.parameter.period), cb);
+    }
+    if (action === 'estadopago') return out(statePagoData(e.parameter.contratoId), cb);
+    if (action === 'createpago') return out(createPagoData(parseItemParam(e)), cb);
+    if (action === 'updatepago') return out(updatePagoData(parseItemParam(e)), cb);
+    if (action === 'deletepago') return out(removePagoData(e.parameter.id), cb);
 
-  return out({ ok:false, error:'Action not found' }, cb);
+    return out({ ok:false, error:'Action not found' }, cb);
+  });
 }
 
 /************ Contratos ************/
@@ -527,7 +599,8 @@ function statusPagosData(idsParam, periodoParam) {
   if (!ids.length) return { periodo, items: {} };
 
   const cacheSvc = cache();
-  const cacheKeys = ids.map((id) => `${CACHE_NS}:status:${periodo}:${id}`);
+  const prefix = cachePrefix();
+  const cacheKeys = ids.map((id) => `${prefix}:status:${periodo}:${id}`);
   const cachedEntries = cacheSvc.getAll(cacheKeys);
   const results = {};
   const missing = [];

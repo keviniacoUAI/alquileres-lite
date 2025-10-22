@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "../hooks/useAuth";
 import { BUTTON_STYLES } from "../constants/ui";
+import { useAuth } from "../hooks/useAuth";
+import ApiEnvironmentSwitcher from "./ApiEnvironmentSwitcher";
 
 export default function LoginScreen() {
   const { login, error, status, usingFallbackHashes, loginHint } = useAuth();
@@ -8,6 +9,7 @@ export default function LoginScreen() {
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showEnvOptions, setShowEnvOptions] = useState(false);
 
   useEffect(() => {
     setMessage(error);
@@ -33,6 +35,9 @@ export default function LoginScreen() {
     }
     if (result.ok) {
       setPassword("");
+      if (typeof window !== "undefined") {
+        window.location.reload();
+      }
     }
 
     setSubmitting(false);
@@ -56,7 +61,7 @@ export default function LoginScreen() {
         )}
 
         <form className="space-y-4" onSubmit={handleSubmit}>
-          <div className="space-y-2">
+          <div className="space-y-2 text-sm">
             <label htmlFor="passcode" className="block text-sm font-medium text-slate-600">
               Clave de acceso
             </label>
@@ -110,6 +115,22 @@ export default function LoginScreen() {
             {submitting ? "Validando..." : "Ingresar"}
           </button>
         </form>
+
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 space-y-2 text-[11px] text-slate-500">
+          <button
+            type="button"
+            onClick={() => setShowEnvOptions((prev) => !prev)}
+            className="flex w-full items-center justify-between font-semibold text-slate-600 hover:text-slate-800 focus:outline-none"
+          >
+            <span>Opciones avanzadas</span>
+            <span aria-hidden="true">{showEnvOptions ? "▾" : "▸"}</span>
+          </button>
+          {showEnvOptions && (
+            <div className="pt-2 border-t border-slate-200">
+              <ApiEnvironmentSwitcher selectClassName="w-full text-xs" size="sm" />
+            </div>
+          )}
+        </div>
 
         {loginHint && (
           <p className="text-xs text-slate-500 text-center border-t border-slate-100 pt-3">

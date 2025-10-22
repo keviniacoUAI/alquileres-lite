@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadList } from "../../services/api";
 import { todayISO, toYMD } from "../../utils/dates";
 import { toMonthKey } from "../../utils/contracts";
+import { useApiEnv } from "../../context/ApiEnvContext";
 
 const DEFAULT_PAGE_SIZE = 10;
 
 export function useContractsData({ showToast }) {
+  const { current } = useApiEnv();
+  const environmentId = current?.id || "default";
+
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -17,6 +21,11 @@ export function useContractsData({ showToast }) {
   const [lastPrice, setLastPrice] = useState({});
   const [lastPriceSince, setLastPriceSince] = useState({});
   const [currentPrice, setCurrentPrice] = useState({});
+  const environmentRef = useRef(environmentId);
+
+  useEffect(() => {
+    environmentRef.current = environmentId;
+  }, [environmentId]);
 
   const currentPeriod = useMemo(() => toMonthKey(todayISO()), []);
 
@@ -24,6 +33,7 @@ export function useContractsData({ showToast }) {
     setLoading(true);
     try {
       const list = await loadList();
+      if (environmentRef.current !== environmentId) return;
       setItems(list);
 
       const lp = {};
@@ -48,20 +58,31 @@ export function useContractsData({ showToast }) {
         lpSince[contrato.id] = toYMD(fallback);
       }
 
+      if (environmentRef.current !== environmentId) return;
       setLastPrice(lp);
       setCurrentPrice(cp);
       setLastPriceSince(lpSince);
     } catch (err) {
       console.error(err);
-      if (showToast) showToast("Error cargando datos", "error");
+      if (environmentRef.current === environmentId && showToast) {
+        showToast("Error cargando datos", "error");
+      }
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [environmentId, showToast]);
 
   useEffect(() => {
     loadContracts();
   }, [loadContracts]);
+
+  useEffect(() => {
+    setItems([]);
+    setLastPrice({});
+    setLastPriceSince({});
+    setCurrentPrice({});
+    setCurrentPageState(1);
+  }, [environmentId]);
 
   useEffect(() => {
     setCurrentPageState(1);
