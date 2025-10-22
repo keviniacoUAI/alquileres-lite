@@ -61,7 +61,13 @@ export function ApiEnvProvider({ children }) {
   }, []);
 
   const [currentId, setCurrentId] = useState(() => {
-    const initialId = environments[0]?.id || null;
+    if (!environments.length) return null;
+    let initialId = environments[0].id;
+    if (typeof window !== "undefined") {
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      const match = environments.find((env) => env.id === stored);
+      if (match?.id) initialId = match.id;
+    }
     const active =
       environments.find((env) => env.id === initialId) || environments[0];
     if (active?.apiUrl) {
