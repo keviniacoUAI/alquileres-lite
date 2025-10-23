@@ -110,7 +110,11 @@ export default function ContractRow({
           {labelText}
         </span>
       );
-    } else if (isOverdue || (isMonthlyPeriod && hasStarted && hasPendingNextIncrease)) {
+    } else if (
+      hasPendingNextIncrease &&
+      hasStarted &&
+      (isOverdue || isLastMonth)
+    ) {
       increaseDisplay = (
         <span
           className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border border-red-200 bg-red-50 text-red-700"
@@ -122,20 +126,6 @@ export default function ContractRow({
         >
           <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
           Pendiente
-        </span>
-      );
-    } else if (isLastMonth && !isMonthlyPeriod && hasPendingNextIncrease) {
-      increaseDisplay = (
-        <span
-          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border border-amber-200 bg-amber-50 text-amber-700"
-          title={
-            nextIncreaseLabel
-              ? `Calcular aumento para cobrar desde ${nextIncreaseLabel}`
-              : "Calcular el proximo aumento para el siguiente periodo"
-          }
-        >
-          <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-          Ultimo mes
         </span>
       );
     } else {
