@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { createOrUpdateContrato, deleteContrato } from "../../services/api";
 import { parseYMD, toYMD, todayISO } from "../../utils/dates";
 
+const digitsOnly = (value) => {
+  if (value == null) return "";
+  return String(value).replace(/\D/g, "");
+};
+
 export function useContractsEditor({
   items,
   setItems,
@@ -34,7 +39,7 @@ export function useContractsEditor({
       contacto: "",
       inicio: todayISO(),
       fin: "",
-      precioMensual: 0,
+      precioMensual: "",
       aumento: "IPC",
       periodicidad: "M",
       notas: "",
@@ -43,7 +48,10 @@ export function useContractsEditor({
 
   const startEdit = useCallback(
     (contrato) => {
-      setEditing({ ...contrato });
+      setEditing({
+        ...contrato,
+        precioMensual: digitsOnly(contrato.precioMensual),
+      });
       setEditingMode("edit");
       if (setOpenMenuId) setOpenMenuId(null);
     },
@@ -52,7 +60,10 @@ export function useContractsEditor({
 
   const startView = useCallback(
     (contrato) => {
-      setEditing({ ...contrato });
+      setEditing({
+        ...contrato,
+        precioMensual: digitsOnly(contrato.precioMensual),
+      });
       setEditingMode("view");
       if (setEditingAum) setEditingAum(null);
       if (setEditingPago) setEditingPago(null);
@@ -71,6 +82,12 @@ export function useContractsEditor({
       event.preventDefault();
       if (!editing) return;
 
+      const precioDigits = digitsOnly(editing.precioMensual);
+      if (!precioDigits) {
+        if (showToast) showToast("Precio inicial inválido", "error");
+        return;
+      }
+
       const inicio = editing.inicio ? parseYMD(editing.inicio) : null;
       const fin = editing.fin ? parseYMD(editing.fin) : null;
       if (inicio && fin && inicio > fin) {
@@ -78,14 +95,19 @@ export function useContractsEditor({
         return;
       }
 
+      const payload = {
+        ...editing,
+        precioMensual: Number(precioDigits),
+      };
+
       const isCreate = !editing.id;
       try {
         setSaving(true);
-        const response = await createOrUpdateContrato(editing);
+        const response = await createOrUpdateContrato(payload);
 
         if (isCreate) {
           const newId = response.id || String(Date.now());
-          const nuevo = { ...editing, id: newId };
+          const nuevo = { ...payload, id: newId };
           setItems((list) => [nuevo, ...list]);
           setLastPrice((state) => ({
             ...state,
@@ -102,24 +124,24 @@ export function useContractsEditor({
         } else {
           setItems((list) =>
             list.map((item) =>
-              item.id === editing.id ? { ...item, ...editing } : item,
+              item.id === payload.id ? { ...item, ...payload } : item,
             ),
           );
           setLastPrice((state) => {
-            const prev = state[editing.id];
-            const nuevoBase = Number(editing.precioMensual || 0);
-            return { ...state, [editing.id]: prev ?? nuevoBase };
+            const prev = state[payload.id];
+            const nuevoBase = Number(payload.precioMensual || 0);
+            return { ...state, [payload.id]: prev ?? nuevoBase };
           });
           setCurrentPrice((state) => ({
             ...state,
-            [editing.id]: Number(editing.precioMensual || 0),
+            [payload.id]: Number(payload.precioMensual || 0),
           }));
-          const contratoBase = items.find((item) => item.id === editing.id);
+          const contratoBase = items.find((item) => item.id === payload.id);
           const since = resolvePriceStart(
-            { ...contratoBase, ...editing },
-            aumByContrato[editing.id],
+            { ...contratoBase, ...payload },
+            aumByContrato[payload.id],
           );
-          setLastPriceSince((state) => ({ ...state, [editing.id]: since }));
+          setLastPriceSince((state) => ({ ...state, [payload.id]: since }));
         }
 
         setEditing(null);

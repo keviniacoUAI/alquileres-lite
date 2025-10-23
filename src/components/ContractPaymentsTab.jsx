@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { fmtMoney } from "../utils/formatters";
 import { fmtDateAR, monthLabelES, toYMD } from "../utils/dates";
 import { BUTTON_STYLES } from "../constants/ui";
+import { DateInput } from "./DateInput";
 
 const PAYMENT_METHODS = ["Transferencia", "Efectivo", "Deposito", "Mercado Pago"];
 
@@ -126,11 +127,16 @@ function PaymentForm({
 
       <label className="flex flex-col gap-1 text-sm text-slate-600">
         Fecha de pago
-        <input
-          type="date"
+        <DateInput
           required
+          isClearable={false}
           value={form.fechaPago}
-          onChange={handleChange("fechaPago")}
+          onChange={(next) =>
+            setForm((prev) => ({
+              ...prev,
+              fechaPago: next,
+            }))
+          }
           disabled={formDisabled}
           className="px-3 py-2 border rounded-xl text-sm"
         />
@@ -462,9 +468,6 @@ function PaymentForm({
     </div>
   );
 }
-
-
-
 
 
 

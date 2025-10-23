@@ -206,7 +206,7 @@ function ContractsApp() {
               <col className="w-[10%]" />
               <col className="w-[12%]" />
               <col className="w-[12%]" />
-              <col className="w-[10%]" />
+              <col className="w-[12%]" />
               <col className="w-[8%]" />
               <col className="w-[8%]" />
               <col className="w-[10%]" />
@@ -259,6 +259,8 @@ function ContractsApp() {
                         ? currentPriceMap[r.id]
                         : resolveMonthlyTotal(r, currentPeriod)
                     }
+                    priceEffectiveSince={lastPriceSince[r.id]}
+                    aumentos={aumByContrato[r.id]}
                     onView={startView}
                   />
                 ))}
@@ -296,7 +298,7 @@ function ContractsApp() {
           )}
         </div>
 
-        <p className="text-xs text-gray-500 mt-3">* Peluca Approved</p>
+        <p className="text-xs text-gray-500 mt-3">* Desarrollado por Kevin C. Iacovantuono</p>
       </main>
 
       <ContractPanel
@@ -311,6 +313,7 @@ function ContractsApp() {
         lastPriceSince={priceEffectiveSince}
         currentPaymentStatus={currentPaymentStatus}
         currentMonthlyTotal={currentMonthlyTotal}
+        aumentos={currentAumentos}
         increasesSlot={increasesTab}
         paymentsSlot={paymentsTab}
       />

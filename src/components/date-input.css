@@ -1,0 +1,43 @@
+.date-input-wrapper {
+  width: 100%;
+  position: relative;
+}
+
+.date-input-wrapper .react-datepicker__input-container {
+  width: 100%;
+}
+
+.date-input-wrapper .react-datepicker__input-container input.date-input-field {
+  width: 100%;
+  padding-right: 2.5rem;
+}
+
+.date-input-clear {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #475569;
+  color: #fff;
+  border-radius: 9999px;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  font-size: 12px;
+  border: none;
+  cursor: pointer;
+}
+
+.date-input-clear:hover {
+  background: #334155;
+}
+
+.date-input-clear:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
+.date-input-popper {
+  z-index: 50;
+}

@@ -13,6 +13,7 @@ import {
   monthSpan,
   monthLabelES,
   toYMD,
+  fmtDateAR,
 } from "../../utils/dates";
 import { toNumberPct } from "../../utils/formatters";
 import { ensureNumber, priceAtDate } from "../../utils/contracts";
@@ -36,6 +37,7 @@ export function useContractAumentos({
   const [aumCalculating, setAumCalculating] = useState({});
   const [aumError, setAumError] = useState({});
   const environmentRef = useRef(environmentId);
+  const loadingRef = useRef(aumLoadingList);
 
   useEffect(() => {
     environmentRef.current = environmentId;
@@ -50,26 +52,51 @@ export function useContractAumentos({
     setAumError({});
   }, [environmentId]);
 
-  const resolvePriceStart = useCallback((contrato, aumentos) => {
-    if (!contrato) return "";
+  const resolvePriceStart = useCallback(
+    (contrato, aumentos, referenceDate = new Date()) => {
+      if (!contrato) return "";
 
-    if (Array.isArray(aumentos) && aumentos.length) {
-      const sorted = [...aumentos].sort(
-        (a, b) => parseYMD(a.hasta) - parseYMD(b.hasta),
-      );
-      for (let idx = sorted.length - 1; idx >= 0; idx -= 1) {
-        const candidate = dayAfter(sorted[idx]?.hasta);
-        if (candidate) return candidate;
+      const refDate =
+        referenceDate instanceof Date
+          ? new Date(referenceDate)
+          : parseYMD(referenceDate);
+      if (refDate && !Number.isNaN(refDate.getTime())) {
+        refDate.setHours(0, 0, 0, 0);
       }
-    }
 
-    if (contrato.ultimaActualizacion) {
-      const normalized = toYMD(contrato.ultimaActualizacion);
-      if (normalized) return normalized;
-    }
+      if (Array.isArray(aumentos) && aumentos.length) {
+        const candidates = aumentos
+          .map((item) => {
+            const appliesFrom =
+              dayAfter(item?.hasta) || item?.aplicaDesde || item?.desde;
+            const applyDate = parseYMD(appliesFrom);
+            if (!applyDate) return null;
+            applyDate.setHours(0, 0, 0, 0);
+            return { applyDate, ymd: toYMD(applyDate) };
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.applyDate - b.applyDate);
 
-    return toYMD(contrato.inicio);
-  }, []);
+        if (candidates.length) {
+          if (refDate) {
+            for (let idx = candidates.length - 1; idx >= 0; idx -= 1) {
+              if (candidates[idx].applyDate <= refDate) {
+                return candidates[idx].ymd;
+              }
+            }
+          }
+        }
+      }
+
+      if (contrato.ultimaActualizacion) {
+        const normalized = toYMD(contrato.ultimaActualizacion);
+        if (normalized) return normalized;
+      }
+
+      return toYMD(contrato.inicio);
+    },
+    [],
+  );
 
   const computeCurrentPrice = useCallback(
     (contrato, aumentosLista) => {
@@ -84,11 +111,18 @@ export function useContractAumentos({
     [lastPrice],
   );
 
+  useEffect(() => {
+    loadingRef.current = aumLoadingList;
+  }, [aumLoadingList]);
+
   const loadAumentos = useCallback(
-    async (contrato, { force = false } = {}) => {
+    async (contrato, { force = false, silent = false } = {}) => {
       if (!contrato?.id) return;
       const id = contrato.id;
-      if (!force && aumByContrato[id]) return;
+      if (!force) {
+        if (aumByContrato[id]) return;
+        if (loadingRef.current?.[id]) return;
+      }
       setAumLoadingList((state) => ({ ...state, [id]: true }));
       setAumError((state) => ({ ...state, [id]: null }));
       try {
@@ -104,11 +138,13 @@ export function useContractAumentos({
       } catch (err) {
         console.error(err);
         if (environmentRef.current !== environmentId) return;
-        setAumError((state) => ({
-          ...state,
-          [id]: "No se pudieron cargar aumentos",
-        }));
-        if (showToast) showToast("No se pudieron cargar aumentos", "error");
+        if (!silent) {
+          setAumError((state) => ({
+            ...state,
+            [id]: "No se pudieron cargar aumentos",
+          }));
+          if (showToast) showToast("No se pudieron cargar aumentos", "error");
+        }
       } finally {
         if (environmentRef.current === environmentId) {
           setAumLoadingList((state) => ({ ...state, [id]: false }));
@@ -121,8 +157,8 @@ export function useContractAumentos({
       environmentId,
       resolvePriceStart,
       setCurrentPrice,
-      setLastPriceSince,
       showToast,
+      setLastPriceSince,
     ],
   );
 
@@ -218,6 +254,16 @@ export function useContractAumentos({
         const desdeYMD = toYMD(desdeDate);
         const hastaYMD = toYMD(hastaDate);
 
+        const contratoFin = contrato?.fin ? parseYMD(contrato.fin) : null;
+        if (contratoFin && (hastaDate > contratoFin || desdeDate > contratoFin)) {
+          const msg = `El aumento calculado excede la fecha de fin del contrato (${fmtDateAR(
+            contrato.fin,
+          )}).`;
+          if (typeof alert === "function") alert(msg);
+          if (showToast) showToast(msg, "warning");
+          return;
+        }
+
         setAumCalculating((state) => ({ ...state, [contrato.id]: true }));
 
         const ipcMap = await fetchIPC(desdeYMD, hastaYMD);
@@ -228,30 +274,50 @@ export function useContractAumentos({
 
         const detalles = [];
         let ultimoConDato = null;
-        const faltantes = [];
+        const missingLastMonths = [];
+        const blockingMissingMonths = [];
         let total = 0;
 
-        for (const ym of meses) {
+        meses.forEach((ym, index) => {
           const val = ipcMap[ym];
+          const isLastMonth = index === meses.length - 1;
+
           if (typeof val === "number") {
             total += val;
             ultimoConDato = val;
             detalles.push(`${monthLabelES(ym)}: ${val.toFixed(2)}%`);
-          } else if (ultimoConDato != null) {
+            return;
+          }
+
+          if (isLastMonth && ultimoConDato != null) {
             total += ultimoConDato;
             detalles.push(
               `${monthLabelES(ym)}: ${ultimoConDato.toFixed(2)}% (estimado)`,
             );
-            faltantes.push(ym);
-          } else {
-            faltantes.push(ym);
+            missingLastMonths.push(ym);
+            return;
           }
+
+          blockingMissingMonths.push(ym);
+        });
+
+        if (blockingMissingMonths.length) {
+          const mesesSinDatos = blockingMissingMonths.map(monthLabelES).join(", ");
+          const aviso =
+            blockingMissingMonths.length === meses.length
+              ? `Todavia no hay informacion de IPC para ${mesesSinDatos}. Debes esperar antes de calcular este aumento.`
+              : `Aun falta informacion de IPC para ${mesesSinDatos}. Debes esperar antes de calcular este aumento.`;
+
+          if (typeof alert === "function") alert(aviso);
+          if (showToast) showToast(aviso, "warning");
+          setAumCalculating((state) => ({ ...state, [contrato.id]: false }));
+          return;
         }
 
         const deseaContinuar =
-          faltantes.length === 0 ||
+          missingLastMonths.length === 0 ||
           confirm(
-            `Aun no hay IPC para: ${faltantes
+            `Aun no hay IPC para: ${missingLastMonths
               .map(monthLabelES)
               .join(
                 ", ",
@@ -336,6 +402,45 @@ export function useContractAumentos({
     async (event) => {
       event.preventDefault();
       if (!editingAum) return;
+
+      const contratoActual = items.find(
+        (c) => c.id === editingAum.contratoId,
+      );
+      if (!contratoActual) {
+        if (showToast) showToast("Contrato no encontrado", "error");
+        return;
+      }
+
+      const desdeDate = parseYMD(editingAum.desde);
+      const hastaDate = parseYMD(editingAum.hasta);
+      if (!desdeDate || !hastaDate) {
+        if (showToast) showToast("Fechas de aumento invalidas", "error");
+        return;
+      }
+
+      const inicioContrato = parseYMD(contratoActual.inicio);
+      if (inicioContrato && desdeDate < inicioContrato) {
+        const msg = `El aumento no puede iniciar antes del contrato (${fmtDateAR(
+          contratoActual.inicio,
+        )}).`;
+        if (showToast) showToast(msg, "error");
+        return;
+      }
+
+      const finContrato = contratoActual.fin
+        ? parseYMD(contratoActual.fin)
+        : null;
+      if (
+        finContrato &&
+        (hastaDate > finContrato || desdeDate > finContrato)
+      ) {
+        const msg = `El aumento no puede superar la fecha de finalizacion del contrato (${fmtDateAR(
+          contratoActual.fin,
+        )}).`;
+        if (showToast) showToast(msg, "error");
+        return;
+      }
+
       const base = Number(editingAum.basePrecio || 0);
       if (!(base > 0)) {
         if (showToast) showToast("Precio base invalido", "error");
@@ -375,12 +480,17 @@ export function useContractAumentos({
           ...state,
           [editingAum.contratoId]: Number(editingAum.nuevoPrecio || 0),
         }));
-        const contrato = items.find((c) => c.id === editingAum.contratoId);
         setLastPriceSince((state) => ({
           ...state,
-          [editingAum.contratoId]: resolvePriceStart(contrato, itemsAums),
+          [editingAum.contratoId]: resolvePriceStart(
+            contratoActual,
+            itemsAums,
+          ),
         }));
-        const actualPrice = computeCurrentPrice(contrato, itemsAums);
+        const actualPrice = computeCurrentPrice(
+          contratoActual,
+          itemsAums,
+        );
         setCurrentPrice((state) => ({
           ...state,
           [editingAum.contratoId]: actualPrice,
@@ -414,6 +524,25 @@ export function useContractAumentos({
   const onDeleteAum = useCallback(
     async (aumento) => {
       setDeletingAumId(aumento.id);
+      const aplicaDesdeYMD =
+        dayAfter(aumento?.hasta) || aumento?.aplicaDesde || aumento?.desde;
+      const aplicaDesdeDate = parseYMD(aplicaDesdeYMD);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (aplicaDesdeDate && aplicaDesdeDate <= today) {
+        setDeletingAumId(null);
+        if (showToast) {
+          showToast(
+            "No se puede eliminar un aumento que ya entró en vigencia.",
+            "warning",
+          );
+        } else if (typeof alert === "function") {
+          alert("No se puede eliminar un aumento que ya entró en vigencia.");
+        }
+        return;
+      }
+
       const ok = confirm("Eliminar este aumento?");
       if (!ok) {
         setDeletingAumId(null);
@@ -478,13 +607,13 @@ export function useContractAumentos({
     [
       computeCurrentPrice,
       environmentId,
+      showToast,
       items,
       resolvePriceStart,
       setCurrentPrice,
       setLastPrice,
       setLastPriceSince,
       setSaving,
-      showToast,
     ],
   );
 

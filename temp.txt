@@ -1,10 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fmtDateAR, toYMD } from "../utils/dates";
+import { fmtDateAR } from "../utils/dates";
 import { fmtMoney } from "../utils/formatters";
-import { BUTTON_STYLES, PERIOD_MONTHS } from "../constants/ui";
+import { BUTTON_STYLES } from "../constants/ui";
 import { DateInput } from "./DateInput";
-import { MoneyInput } from "./MoneyInput";
-import { resolveIncreaseStatus } from "../utils/contracts";
 
 const TAB_LABELS = Object.freeze({
   info: "Informacion",
@@ -15,22 +13,6 @@ const TAB_LABELS = Object.freeze({
 const TABS_ORDER = ["info", "increases", "payments"];
 const PANEL_HEIGHT = "min(640px, calc(100vh - 2rem))";
 
-const WarningIcon = ({ className = "h-5 w-5 text-amber-500" }) => (
-  <svg
-    className={className}
-    viewBox="0 0 20 20"
-    fill="currentColor"
-    aria-hidden="true"
-    focusable="false"
-  >
-    <path
-      fillRule="evenodd"
-      d="M8.257 3.099c.765-1.36 2.721-1.36 3.486 0l6.518 11.59c.75 1.334-.213 3.01-1.743 3.01H3.482c-1.53 0-2.493-1.676-1.744-3.01l6.519-11.59zM9 7a1 1 0 112 0v4a1 1 0 11-2 0V7zm1 8a1.25 1.25 0 100-2.5A1.25 1.25 0 0010 15z"
-      clipRule="evenodd"
-    />
-  </svg>
-);
-
 export default function ContractPanel({
   editing,
   mode = "edit",
@@ -39,7 +21,6 @@ export default function ContractPanel({
   onSubmit,
   setEditing,
   setMode,
-  aumentos,
   increasesSlot,
   paymentsSlot,
   lastPriceValue,
@@ -59,12 +40,6 @@ export default function ContractPanel({
     if (!canShowTabs) return ["info"];
     return TABS_ORDER;
   }, [canShowTabs]);
-
-  const hasAumentosData = Array.isArray(aumentos);
-  const increaseStatus = useMemo(() => {
-    if (!editing || !hasAumentosData) return null;
-    return resolveIncreaseStatus(editing, { lastPriceSince, aumentos });
-  }, [aumentos, editing, hasAumentosData, lastPriceSince]);
 
   if (!editing) return null;
 
@@ -112,36 +87,6 @@ export default function ContractPanel({
       partial: "Parcial",
       pending: "Pendiente",
     }[currentPaymentStatus] || "Sin datos";
-
-  const periodMonths = editing ? PERIOD_MONTHS[editing.periodicidad] || 0 : 0;
-  const hasUpcomingIncrease = Boolean(increaseStatus?.hasUpcomingIncrease);
-  const hasCurrentIncrease = Boolean(increaseStatus?.hasCurrentIncrease);
-  const hasStarted = Boolean(increaseStatus?.hasStarted);
-  const hasPendingNextIncrease = Boolean(increaseStatus?.hasPendingNextIncrease);
-  const isOverdue = Boolean(increaseStatus?.isOverdue);
-  const isMonthlyPending =
-    hasStarted && hasPendingNextIncrease && periodMonths <= 1;
-  const isFinalMonth = Boolean(
-    increaseStatus?.isLastMonth && periodMonths > 1,
-  );
-  const showIncreaseAlert =
-    increaseStatus && hasPendingNextIncrease && (isOverdue || isFinalMonth || isMonthlyPending);
-
-  const nextIncreaseLabel = increaseStatus?.nextIncreaseDate
-    ? fmtDateAR(toYMD(increaseStatus.nextIncreaseDate))
-    : "";
-
-  const alertTone = isOverdue || isMonthlyPending
-    ? {
-        container: "border-red-200 bg-red-50 text-red-800",
-        icon: "text-red-500",
-        subtitle: "text-red-700",
-      }
-    : {
-        container: "border-amber-200 bg-amber-50 text-amber-800",
-        icon: "text-amber-500",
-        subtitle: "text-amber-700",
-      };
 
   return (
     <div className="fixed inset-0 z-30 overflow-y-auto bg-black/30 backdrop-blur-sm">
@@ -289,14 +234,16 @@ export default function ContractPanel({
                         <span className="text-sm text-gray-600">
                           Precio inicial (ARS)
                         </span>
-                        <MoneyInput
+                        <input
+                          type="number"
+                          min={0}
                           required
                           disabled={formDisabled}
                           value={editing.precioMensual}
-                          onChange={(nextDigits) =>
+                          onChange={(e) =>
                             setEditing((s) => ({
                               ...s,
-                              precioMensual: nextDigits,
+                              precioMensual: e.target.value,
                             }))
                           }
                           className="px-3 py-2 border rounded-xl"
@@ -345,35 +292,6 @@ export default function ContractPanel({
                         </select>
                       </label>
                     </div>
-                    {showIncreaseAlert && (
-                      <div
-                        className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${alertTone.container}`}
-                      >
-                        <WarningIcon className={`h-5 w-5 shrink-0 ${alertTone.icon}`} />
-                        <div className="space-y-1">
-                          <p className="font-semibold">
-                            {isOverdue
-                              ? "Aumento vencido"
-                              : isMonthlyPending
-                                ? "Aumento pendiente"
-                                : "Ultimo mes sin aumento"}
-                          </p>
-                          <p className={`text-xs ${alertTone.subtitle}`}>
-                            {isOverdue
-                              ? nextIncreaseLabel
-                                ? `El siguiente mes ya deberia cobrarse con aumento (desde ${nextIncreaseLabel}). Genera el ajuste para actualizar los importes.`
-                                : "El siguiente mes ya deberia cobrarse con aumento. Genera el ajuste para actualizar los importes."
-                              : isMonthlyPending
-                                ? nextIncreaseLabel
-                                  ? `Genera el aumento para cobrar desde ${nextIncreaseLabel}.`
-                                  : "Genera el aumento para el proximo mes para mantener el cronograma."
-                                : nextIncreaseLabel
-                                  ? `Este es el ultimo mes antes del proximo aumento. Calcula el ajuste para cobrar desde ${nextIncreaseLabel}.`
-                                  : "Este es el ultimo mes antes del proximo aumento. Calcula el ajuste para el siguiente mes."}
-                          </p>
-                        </div>
-                      </div>
-                    )}
                   </div>
 
                   {editing.id && (

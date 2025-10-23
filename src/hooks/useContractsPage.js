@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { paymentDueDate, toYMD } from "../utils/dates";
+import { PERIOD_MONTHS } from "../constants/ui";
+import { resolveIncreaseStatus } from "../utils/contracts";
 import { useToast } from "./useToast";
 import { useContractsData } from "./contracts/useContractsData";
 import { useContractPayments } from "./contracts/useContractPayments";
@@ -84,6 +86,28 @@ export function useContractsPage() {
     loadPayments(contrato);
     loadAumentos(contrato);
   }, [editor.editing, loadPayments, loadAumentos]);
+
+  useEffect(() => {
+    if (!Array.isArray(derived.paginated) || !derived.paginated.length) return;
+    derived.paginated.forEach((contrato) => {
+      if (!contrato?.id) return;
+      const periodMonths = PERIOD_MONTHS[contrato.periodicidad] || 0;
+      if (periodMonths <= 1) return;
+      const since = data.lastPriceSince[contrato.id];
+      const status = resolveIncreaseStatus(contrato, { lastPriceSince: since });
+      if (status && (status.isLastMonth || status.isOverdue)) {
+        loadAumentos(contrato, { silent: true });
+      }
+    });
+  }, [data.lastPriceSince, derived.paginated, loadAumentos]);
+
+  useEffect(() => {
+    if (!Array.isArray(derived.paginated) || !derived.paginated.length) return;
+    derived.paginated.forEach((contrato) => {
+      if (!contrato?.id) return;
+      loadAumentos(contrato, { silent: true });
+    });
+  }, [derived.paginated, loadAumentos]);
 
   useEffect(() => {
     cancelEdit();

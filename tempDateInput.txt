@@ -1,0 +1,174 @@
+
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
+import DatePicker from "react-datepicker";
+import InputMask from "react-input-mask";
+import "react-datepicker/dist/react-datepicker.css";
+import { parseYMD, toYMD } from "../utils/dates";
+import "./date-input.css";
+
+const formatDisplay = (value) => {
+  if (!value) return "";
+  const date =
+    value instanceof Date
+      ? value
+      : parseYMD(typeof value === "string" ? value : String(value));
+  if (!date || Number.isNaN(date.getTime())) return "";
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+};
+
+const parseDisplay = (display) => {
+  if (!display || display.includes("_")) return null;
+  const digits = display.replace(/\D/g, "");
+  if (digits.length !== 8) return null;
+  const dd = Number(digits.slice(0, 2));
+  const mm = Number(digits.slice(2, 4));
+  const yyyy = Number(digits.slice(4));
+  if (!dd || !mm || !yyyy) return null;
+  const date = new Date(yyyy, mm - 1, dd);
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== yyyy ||
+    date.getMonth() + 1 !== mm ||
+    date.getDate() !== dd
+  ) {
+    return null;
+  }
+  return date;
+};
+
+const MaskedInput = forwardRef(function MaskedInput(
+  { value, onChange, onBlur, onFocus, onClick, placeholder, disabled, className },
+  ref,
+) {
+  return (
+    <InputMask
+      mask="99/99/9999"
+      value={value}
+      onChange={onChange}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      disabled={disabled}
+    >
+      {(inputProps) => (
+        <input
+          {...inputProps}
+          ref={ref}
+          onClick={onClick}
+          placeholder={placeholder}
+          className={`date-input-field ${className || ""}`.trim()}
+        />
+      )}
+    </InputMask>
+  );
+});
+
+export function DateInput({
+  value,
+  onChange,
+  className = "",
+  required = false,
+  disabled = false,
+  placeholder = "dd/mm/aaaa",
+  minDate,
+  maxDate,
+  isClearable = true,
+  ...rest
+}) {
+  const formattedValue = useMemo(() => formatDisplay(value), [value]);
+  const [displayValue, setDisplayValue] = useState(formattedValue);
+  const typingRef = useRef(false);
+
+  useEffect(() => {
+    if (!typingRef.current) {
+      setDisplayValue(formattedValue);
+    }
+  }, [formattedValue]);
+
+  const selectedDate = useMemo(() => {
+    if (!value || (typingRef.current && displayValue !== formattedValue)) {
+      return null;
+    }
+    if (value instanceof Date) return value;
+    return parseYMD(value);
+  }, [displayValue, formattedValue, value]);
+
+  const emitChange = (nextValue) => {
+    if (onChange) onChange(nextValue);
+  };
+
+  const handleCalendarChange = (date) => {
+    typingRef.current = false;
+    if (date && minDate && date < minDate) date = minDate;
+    if (date && maxDate && date > maxDate) date = maxDate;
+    setDisplayValue(formatDisplay(date));
+    emitChange(date ? toYMD(date) : "");
+  };
+
+  const handleMaskChange = (event) => {
+    typingRef.current = true;
+    const nextDisplay = event.target.value;
+    setDisplayValue(nextDisplay);
+    const parsed = parseDisplay(nextDisplay);
+    if (!nextDisplay.replace(/\D/g, "")) {
+      emitChange("");
+      return;
+    }
+    if (parsed) {
+      emitChange(toYMD(parsed));
+    }
+  };
+
+  const handleBlur = () => {
+    typingRef.current = false;
+    if (!displayValue) {
+      emitChange("");
+      return;
+    }
+    const parsed = parseDisplay(displayValue);
+    if (!parsed) {
+      setDisplayValue("");
+      emitChange("");
+    } else {
+      const formatted = formatDisplay(parsed);
+      setDisplayValue(formatted);
+      emitChange(toYMD(parsed));
+    }
+  };
+
+  return (
+    <DatePicker
+      selected={selectedDate}
+      onChange={handleCalendarChange}
+      value={displayValue}
+      customInput={
+        <MaskedInput
+          value={displayValue}
+          onChange={handleMaskChange}
+          onBlur={handleBlur}
+          onFocus={() => {
+            typingRef.current = true;
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+          className={className}
+        />
+      }
+      wrapperClassName="date-input-wrapper"
+      popperClassName="date-input-popper"
+      calendarClassName="date-input-calendar"
+      isClearable={isClearable && !required}
+      minDate={minDate}
+      maxDate={maxDate}
+      onCalendarOpen={() => {
+        typingRef.current = false;
+      }}
+      onCalendarClose={() => {
+        typingRef.current = false;
+      }}
+      {...rest}
+    />
+  );
+}
