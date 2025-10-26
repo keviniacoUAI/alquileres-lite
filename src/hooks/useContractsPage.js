@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { paymentDueDate, toYMD } from "../utils/dates";
 import { PERIOD_MONTHS } from "../constants/ui";
 import { resolveIncreaseStatus } from "../utils/contracts";
@@ -18,7 +18,23 @@ export function useContractsPage() {
   const { toast, showToast, hideToast } = useToast();
   const data = useContractsData({ showToast });
 
-  const [saving, setSaving] = useState(false);
+  const [saving, setSavingFlag] = useState(false);
+  const [savingMessage, setSavingMessage] = useState("");
+  const setSaving = useCallback((value, meta = {}) => {
+    const next = Boolean(value);
+    setSavingFlag(next);
+    if (next) {
+      if (typeof meta === "string") {
+        setSavingMessage(meta);
+      } else if (meta && typeof meta === "object" && meta.message) {
+        setSavingMessage(meta.message);
+      } else {
+        setSavingMessage("Procesando...");
+      }
+    } else {
+      setSavingMessage("");
+    }
+  }, []);
   const menu = useContractsMenu();
 
   const aumentos = useContractAumentos({
@@ -150,6 +166,7 @@ export function useContractsPage() {
     openMenuId: menu.openMenuId,
     menuRef: menu.menuRef,
     saving,
+    savingMessage,
     toast,
     pageSize: data.pageSize,
     currentPage: data.currentPage,

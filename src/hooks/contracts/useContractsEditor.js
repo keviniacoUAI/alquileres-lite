@@ -102,7 +102,9 @@ export function useContractsEditor({
 
       const isCreate = !editing.id;
       try {
-        setSaving(true);
+        setSaving(true, {
+          message: isCreate ? "Guardando contrato..." : "Actualizando contrato...",
+        });
         const response = await createOrUpdateContrato(payload);
 
         if (isCreate) {
@@ -179,7 +181,7 @@ export function useContractsEditor({
         return;
       }
       try {
-        setSaving(true);
+        setSaving(true, { message: "Eliminando contrato..." });
         await deleteContrato(contrato.id);
         setItems((list) => list.filter((item) => item.id !== contrato.id));
         setLastPrice((state) => {

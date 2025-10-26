@@ -47,6 +47,7 @@ export default function ContractPanel({
   currentPaymentStatus,
   currentMonthlyTotal,
   paymentsSaving = false,
+  savingMessage = "",
 }) {
   const [activeTab, setActiveTab] = useState("info");
 
@@ -73,7 +74,7 @@ export default function ContractPanel({
   const isView = mode === "view";
   const panelBusy = Boolean(saving || paymentsSaving);
   const busyMessage = saving
-    ? "Guardando contrato..."
+    ? savingMessage || "Guardando..."
     : paymentsSaving
       ? "Guardando pago..."
       : "Procesando...";

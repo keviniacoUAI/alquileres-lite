@@ -39,6 +39,7 @@ function ContractsApp() {
     openMenuId,
     menuRef,
     saving,
+    savingMessage,
     toast,
     pageSize,
     currentPage,
@@ -158,6 +159,9 @@ function ContractsApp() {
         )
       : null;
 
+  const globalBusy = saving && !editing && !editingAum;
+  const globalBusyMessage = savingMessage || "Procesando...";
+
   return (
     <div className="min-h-screen bg-gray-50">
       <ContractsHeader
@@ -171,7 +175,15 @@ function ContractsApp() {
         onLogout={logout}
       />
 
-      <main className="max-w-[1320px] mx-auto p-4">
+      <main className="max-w-[1320px] mx-auto p-4 relative">
+        {globalBusy && (
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3 px-6 py-5 bg-white/90 border border-blue-100 rounded-2xl shadow-lg">
+              <span className="h-9 w-9 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+              <p className="text-sm font-medium text-gray-700">{globalBusyMessage}</p>
+            </div>
+          </div>
+        )}
         <StatusLegend />
 
         <div className="bg-white rounded-2xl shadow-sm border px-4 pr-8 py-2 mt-3 flex flex-col">
@@ -317,11 +329,13 @@ function ContractsApp() {
         increasesSlot={increasesTab}
         paymentsSlot={paymentsTab}
         paymentsSaving={savingPago}
+        savingMessage={savingMessage}
       />
 
       <AumModal
         editingAum={editingAum}
         saving={saving}
+        savingMessage={savingMessage}
         onCancel={cancelAum}
         onSubmit={saveAum}
         setEditingAum={setEditingAum}

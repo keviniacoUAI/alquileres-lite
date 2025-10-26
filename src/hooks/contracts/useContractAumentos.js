@@ -467,7 +467,7 @@ export function useContractAumentos({
       }
 
       try {
-        setSaving(true);
+        setSaving(true, { message: "Guardando aumento..." });
 
         const pctNum = toNumberPct(editingAum.porcentaje);
         const payload = {
@@ -569,7 +569,7 @@ export function useContractAumentos({
       }
 
       try {
-        setSaving(true);
+        setSaving(true, { message: "Eliminando aumento..." });
 
         await deleteAum(aumento.id);
         if (environmentRef.current !== environmentId) return;
