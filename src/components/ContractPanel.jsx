@@ -90,7 +90,7 @@ export default function ContractPanel({
   if (hasPayments) lockReasons.push("el contrato tiene pagos registrados");
   const lockMessage =
     lockStructuralFields && lockReasons.length
-      ? `Estos campos se bloquean porque ${lockReasons.join(" y ")}.`
+      ? `Estos campos se encuentran bloqueados porque ${lockReasons.join(" y ")}.`
       : "";
 
   const title = isCreate
