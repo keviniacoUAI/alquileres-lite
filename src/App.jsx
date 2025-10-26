@@ -316,6 +316,7 @@ function ContractsApp() {
         aumentos={currentAumentos}
         increasesSlot={increasesTab}
         paymentsSlot={paymentsTab}
+        paymentsSaving={savingPago}
       />
 
       <AumModal

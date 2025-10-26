@@ -53,15 +53,28 @@ export function useContractAumentos({
   }, [environmentId]);
 
   const resolvePriceStart = useCallback(
-    (contrato, aumentos, referenceDate = new Date()) => {
+    (contrato, aumentos, referenceDate) => {
       if (!contrato) return "";
 
-      const refDate =
-        referenceDate instanceof Date
-          ? new Date(referenceDate)
-          : parseYMD(referenceDate);
+      const hasReference =
+        referenceDate !== undefined && referenceDate !== null;
+      let refDate = null;
+      if (
+        referenceDate instanceof Date ||
+        (typeof referenceDate === "string" && referenceDate)
+      ) {
+        refDate =
+          referenceDate instanceof Date
+            ? new Date(referenceDate)
+            : parseYMD(referenceDate);
+      } else if (typeof referenceDate === "number") {
+        refDate = new Date(referenceDate);
+      }
+
       if (refDate && !Number.isNaN(refDate.getTime())) {
         refDate.setHours(0, 0, 0, 0);
+      } else {
+        refDate = null;
       }
 
       if (Array.isArray(aumentos) && aumentos.length) {
@@ -84,6 +97,12 @@ export function useContractAumentos({
                 return candidates[idx].ymd;
               }
             }
+          } else if (!hasReference) {
+            return candidates[candidates.length - 1].ymd;
+          }
+
+          if (hasReference && !refDate) {
+            return candidates[candidates.length - 1].ymd;
           }
         }
       }

@@ -46,6 +46,7 @@ export default function ContractPanel({
   lastPriceSince,
   currentPaymentStatus,
   currentMonthlyTotal,
+  paymentsSaving = false,
 }) {
   const [activeTab, setActiveTab] = useState("info");
 
@@ -70,7 +71,16 @@ export default function ContractPanel({
 
   const isCreate = mode === "create";
   const isView = mode === "view";
-  const formDisabled = saving || isView;
+  const panelBusy = Boolean(saving || paymentsSaving);
+  const busyMessage = saving
+    ? "Guardando contrato..."
+    : paymentsSaving
+      ? "Guardando pago..."
+      : "Procesando...";
+  const formDisabled = panelBusy || isView;
+  const panelInnerClass = panelBusy
+    ? "flex h-full flex-col pointer-events-none select-none"
+    : "flex h-full flex-col";
 
   const title = isCreate
     ? "Nuevo contrato"
@@ -79,6 +89,7 @@ export default function ContractPanel({
       : "Editar contrato";
 
   const handleTabSelect = (nextTab) => {
+    if (panelBusy) return;
     setActiveTab(nextTab);
   };
 
@@ -147,63 +158,76 @@ export default function ContractPanel({
     <div className="fixed inset-0 z-30 overflow-y-auto bg-black/30 backdrop-blur-sm">
       <div className="flex min-h-full items-start justify-center p-4 md:items-center">
         <div
-          className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl border overflow-hidden flex h-full flex-col"
+          className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl border overflow-hidden flex h-full flex-col relative"
           style={{ height: PANEL_HEIGHT }}
+          aria-busy={panelBusy}
         >
-          <header className="px-6 py-5 border-b flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">{title}</h2>
-              {editing.id && (
-                <p className="text-sm text-gray-500 break-all">
-                  ID: {editing.id}
-                </p>
-              )}
+          {panelBusy && (
+            <div
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white/70 backdrop-blur-sm"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="h-8 w-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+              <p className="text-sm font-medium text-gray-600">{busyMessage}</p>
             </div>
-            <div className="flex items-center gap-2">
-              {!isCreate && isView && (
+          )}
+          <div className={panelInnerClass}>
+            <header className="px-6 py-5 border-b flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">{title}</h2>
+                {editing.id && (
+                  <p className="text-sm text-gray-500 break-all">
+                    ID: {editing.id}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {!isCreate && isView && (
+                  <button
+                    type="button"
+                    onClick={handleStartEdit}
+                    className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.primary} ${BUTTON_STYLES.sm}`}
+                    disabled={panelBusy}
+                  >
+                    Editar
+                  </button>
+                )}
                 <button
-                  type="button"
-                  onClick={handleStartEdit}
-                  className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.primary} ${BUTTON_STYLES.sm}`}
-                  disabled={saving}
+                  onClick={onCancel}
+                  className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.outline} ${BUTTON_STYLES.sm}`}
+                  disabled={panelBusy}
                 >
-                  Editar
+                  Cerrar
                 </button>
-              )}
-              <button
-                onClick={onCancel}
-                className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.outline} ${BUTTON_STYLES.sm}`}
-                disabled={saving}
-              >
-                Cerrar
-              </button>
-            </div>
-          </header>
+              </div>
+            </header>
 
-          <nav className="px-6 pt-4">
-            <div className="flex gap-3 border-b">
-              {tabs.map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => handleTabSelect(tab)}
-                  className={`px-3 pb-3 text-sm font-medium transition ${
-                    isActive(tab)
-                      ? "text-blue-600 border-b-2 border-blue-600"
-                      : "text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  {TAB_LABELS[tab]}
-                </button>
-              ))}
-            </div>
-          </nav>
+            <nav className="px-6 pt-4">
+              <div className="flex gap-3 border-b">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => handleTabSelect(tab)}
+                    disabled={panelBusy}
+                    className={`px-3 pb-3 text-sm font-medium transition ${
+                      isActive(tab)
+                        ? "text-blue-600 border-b-2 border-blue-600"
+                        : "text-gray-500 hover:text-gray-700"
+                    } ${panelBusy ? "opacity-50 cursor-not-allowed" : ""}`}
+                  >
+                    {TAB_LABELS[tab]}
+                  </button>
+                ))}
+              </div>
+            </nav>
 
-          <div className="flex-1 overflow-y-auto">
-            <div className="px-6 py-6 space-y-6">
-              {isActive("info") && (
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex-1 overflow-y-auto">
+              <div className="px-6 py-6 space-y-6">
+                {isActive("info") && (
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <label className="flex flex-col gap-1">
                       <span className="text-sm text-gray-600">Domicilio</span>
                       <input
@@ -443,17 +467,21 @@ export default function ContractPanel({
                       <button
                         type="button"
                         onClick={onCancel}
-                        disabled={saving}
+                        disabled={panelBusy}
                         className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.outline} ${BUTTON_STYLES.md}`}
                       >
                         Cancelar
                       </button>
                       <button
                         type="submit"
-                        disabled={saving}
+                        disabled={panelBusy}
                         className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.primary} ${BUTTON_STYLES.md}`}
                       >
-                        {saving ? "Guardando..." : "Guardar"}
+                        {panelBusy
+                          ? saving
+                            ? "Guardando..."
+                            : "Procesando..."
+                          : "Guardar"}
                       </button>
                     </div>
                   )}
@@ -483,6 +511,7 @@ export default function ContractPanel({
               )}
             </div>
           </div>
+        </div>
         </div>
       </div>
     </div>

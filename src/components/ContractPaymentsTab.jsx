@@ -229,7 +229,7 @@ function PaymentForm({
   readOnly = false,
 }) {
   const [expandedPeriodo, setExpandedPeriodo] = useState(null);
-  const canEdit = !readOnly;
+  const canEdit = !readOnly && !savingPago;
 
   const currentPeriodo = useMemo(() => toMonthKey(new Date()), []);
 
@@ -276,7 +276,8 @@ function PaymentForm({
         {onReload && (
           <button
             onClick={onReload}
-            className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.outline} ${BUTTON_STYLES.xs}`}
+            disabled={savingPago}
+            className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.outline} ${BUTTON_STYLES.xs} disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             Reintentar
           </button>
@@ -287,6 +288,15 @@ function PaymentForm({
 
   return (
     <div className="space-y-6">
+      {savingPago && (
+        <div className="flex items-center gap-2 px-4 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-xl">
+          <span
+            className="h-4 w-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin"
+            aria-hidden="true"
+          />
+          Guardando pago...
+        </div>
+      )}
       {summary && (
         <section className="border rounded-2xl bg-white shadow-sm p-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -303,7 +313,8 @@ function PaymentForm({
               {onReload && (
                 <button
                   onClick={onReload}
-                  className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.outline} ${BUTTON_STYLES.xs}`}
+                  disabled={savingPago}
+                  className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.outline} ${BUTTON_STYLES.xs} disabled:opacity-40 disabled:cursor-not-allowed`}
                 >
                   Actualizar
                 </button>
@@ -468,10 +479,6 @@ function PaymentForm({
     </div>
   );
 }
-
-
-
-
 
 
 
