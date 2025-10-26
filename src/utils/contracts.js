@@ -62,17 +62,35 @@ export const resolveIncreaseStatus = (
   if (periodMonths <= 0) return null;
 
   const contractStart = parseYMD(contrato.inicio);
-  const cycleStart =
+  const cycleStartRaw =
     parseYMD(lastPriceSince) || contractStart || parseYMD(contrato.inicio);
-  if (!cycleStart) return null;
+  if (!cycleStartRaw) return null;
 
-  const anchorSource = contractStart || cycleStart;
+  const anchorSource = contractStart || cycleStartRaw;
   const anchorDay = anchorSource ? anchorSource.getDate() : 1;
 
   const refDate =
     referenceDate instanceof Date ? new Date(referenceDate) : parseYMD(referenceDate);
   if (!refDate || Number.isNaN(refDate.getTime())) return null;
   refDate.setHours(0, 0, 0, 0);
+
+  let cycleStart = new Date(cycleStartRaw);
+  cycleStart.setHours(0, 0, 0, 0);
+  if (cycleStart > refDate && periodMonths > 0) {
+    let iterations = 0;
+    while (cycleStart > refDate && iterations < 120) {
+      const previous = addMonthsAligned(cycleStart, -periodMonths, anchorDay);
+      if (!previous || Number.isNaN(previous.getTime())) break;
+      previous.setHours(0, 0, 0, 0);
+      if (previous.getTime() === cycleStart.getTime()) break;
+      cycleStart = previous;
+      iterations += 1;
+    }
+    if (cycleStart > refDate && contractStart) {
+      cycleStart = new Date(contractStart);
+      cycleStart.setHours(0, 0, 0, 0);
+    }
+  }
 
   const hasStarted = refDate >= cycleStart;
 
