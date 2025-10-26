@@ -47,6 +47,8 @@ export default function ContractPanel({
   currentPaymentStatus,
   currentMonthlyTotal,
   paymentsSaving = false,
+  hasAumentos = false,
+  hasPayments = false,
   savingMessage = "",
 }) {
   const [activeTab, setActiveTab] = useState("info");
@@ -75,13 +77,21 @@ export default function ContractPanel({
   const panelBusy = Boolean(saving || paymentsSaving);
   const busyMessage = saving
     ? savingMessage || "Guardando..."
-    : paymentsSaving
-      ? "Guardando pago..."
-      : "Procesando...";
+      : paymentsSaving
+        ? "Guardando pago..."
+        : "Procesando...";
   const formDisabled = panelBusy || isView;
   const panelInnerClass = panelBusy
     ? "flex h-full flex-col pointer-events-none select-none"
     : "flex h-full flex-col";
+  const lockStructuralFields = !isCreate && (hasAumentos || hasPayments);
+  const lockReasons = [];
+  if (hasAumentos) lockReasons.push("el contrato tiene aumentos registrados");
+  if (hasPayments) lockReasons.push("el contrato tiene pagos registrados");
+  const lockMessage =
+    lockStructuralFields && lockReasons.length
+      ? `Estos campos se bloquean porque ${lockReasons.join(" y ")}.`
+      : "";
 
   const title = isCreate
     ? "Nuevo contrato"
@@ -279,13 +289,18 @@ export default function ContractPanel({
                     <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
                       Datos del contrato
                     </h3>
+                    {lockStructuralFields && lockMessage && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                        {lockMessage}
+                      </p>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <label className="flex flex-col gap-1">
                         <span className="text-sm text-gray-600">Inicio</span>
                         <DateInput
                           required
                           isClearable={false}
-                          disabled={formDisabled}
+                          disabled={formDisabled || lockStructuralFields}
                           value={editing.inicio}
                           onChange={(next) =>
                             setEditing((s) => ({
@@ -299,7 +314,7 @@ export default function ContractPanel({
                       <label className="flex flex-col gap-1">
                         <span className="text-sm text-gray-600">Fin</span>
                         <DateInput
-                          disabled={formDisabled}
+                          disabled={formDisabled || lockStructuralFields}
                           value={editing.fin}
                           onChange={(next) =>
                             setEditing((s) => ({
@@ -316,7 +331,7 @@ export default function ContractPanel({
                         </span>
                         <MoneyInput
                           required
-                          disabled={formDisabled}
+                          disabled={formDisabled || lockStructuralFields}
                           value={editing.precioMensual}
                           onChange={(nextDigits) =>
                             setEditing((s) => ({
@@ -334,7 +349,7 @@ export default function ContractPanel({
                           Tipo de aumento
                         </span>
                         <select
-                          disabled={formDisabled}
+                          disabled={formDisabled || lockStructuralFields}
                           value={editing.aumento}
                           onChange={(e) =>
                             setEditing((s) => ({
@@ -352,7 +367,7 @@ export default function ContractPanel({
                           Periodicidad
                         </span>
                         <select
-                          disabled={formDisabled}
+                          disabled={formDisabled || lockStructuralFields}
                           value={editing.periodicidad}
                           onChange={(e) =>
                             setEditing((s) => ({

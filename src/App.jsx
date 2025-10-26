@@ -102,6 +102,13 @@ function ContractsApp() {
   const aumErrorState = editing?.id ? aumError[editing.id] : null;
   const aumCalculatingState = editing?.id ? Boolean(aumCalculating[editing.id]) : false;
 
+  const hasExistingAumentos =
+    Array.isArray(currentAumentos) && currentAumentos.length > 0;
+  const hasExistingPayments =
+    currentPayments && Array.isArray(currentPayments.raw)
+      ? currentPayments.raw.length > 0
+      : false;
+
   const isViewMode = editingMode === "view";
   const totalRecords = filtered.length;
   const pageStartIndex =
@@ -329,6 +336,8 @@ function ContractsApp() {
         increasesSlot={increasesTab}
         paymentsSlot={paymentsTab}
         paymentsSaving={savingPago}
+        hasAumentos={hasExistingAumentos}
+        hasPayments={hasExistingPayments}
         savingMessage={savingMessage}
       />
 
