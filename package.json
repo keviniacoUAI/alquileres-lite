@@ -26,7 +26,8 @@
     "globals": "^16.4.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.14",
-    "vite": "npm:rolldown-vite@7.1.14"
+    "vite": "npm:rolldown-vite@7.1.14",
+    "vite-plugin-pwa": "^0.20.5"
   },
   "overrides": {
     "vite": "npm:rolldown-vite@7.1.14"

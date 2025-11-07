@@ -14,3 +14,23 @@ createRoot(document.getElementById("root")).render(
     </ApiEnvProvider>
   </StrictMode>
 );
+
+if ("serviceWorker" in navigator) {
+  import("virtual:pwa-register")
+    .then(({ registerSW }) =>
+      registerSW({
+        immediate: true,
+        onRegistered(swReg) {
+          if (import.meta.env.DEV) {
+            console.log("Service Worker registrado", swReg);
+          }
+        },
+        onRegisterError(error) {
+          console.error("Error registrando el Service Worker", error);
+        },
+      }),
+    )
+    .catch((error) => {
+      console.error("virtual:pwa-register import failed", error);
+    });
+}

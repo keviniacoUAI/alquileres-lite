@@ -1,0 +1,43 @@
+{
+  "id": ".",
+  "name": "Alquileres Admin",
+  "short_name": "Alquileres",
+  "description": "Panel liviano para ver contratos, aumentos y pagos de alquileres.",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "display": "standalone",
+  "display_override": ["standalone", "browser"],
+  "scope": ".",
+  "start_url": ".",
+  "lang": "es",
+  "orientation": "portrait",
+  "categories": ["productivity", "finance"],
+  "icons": [
+    {
+      "src": "icons/pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/pwa-icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
