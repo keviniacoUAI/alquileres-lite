@@ -185,6 +185,7 @@ export function useContractsPage() {
     setPage: derived.setPage,
     setPageSize: derived.setPageSize,
     startNew: editor.startNew,
+    startCopy: editor.startCopy,
     startEdit: editor.startEdit,
     startView: editor.startView,
     startNewPago: payments.startNewPago,

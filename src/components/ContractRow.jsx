@@ -35,6 +35,7 @@ const PAYMENT_STATUS_META = Object.freeze({
 export default function ContractRow({
   r,
   startEdit,
+  onCopy,
   onDelete,
   saving,
   paymentStatus,
@@ -184,6 +185,12 @@ export default function ContractRow({
                 className="block w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
               >
                 Editar
+              </button>
+              <button
+                onClick={() => onCopy && onCopy(r)}
+                className="block w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
+              >
+                Copiar contrato
               </button>
               <button
                 onClick={() => onDelete(r)}

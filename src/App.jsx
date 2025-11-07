@@ -53,6 +53,7 @@ function ContractsApp() {
     setOpenMenuId,
     setEditingAum,
     startNew,
+    startCopy,
     startEdit,
     startView,
     startNewPago,
@@ -267,6 +268,7 @@ function ContractsApp() {
                     key={r.id}
                     r={r}
                     startEdit={startEdit}
+                    onCopy={startCopy}
                     onDelete={onDelete}
                     saving={saving}
                     openMenuId={openMenuId}
@@ -338,6 +340,7 @@ function ContractsApp() {
         paymentsSaving={savingPago}
         hasAumentos={hasExistingAumentos}
         hasPayments={hasExistingPayments}
+        onCopy={startCopy}
         savingMessage={savingMessage}
       />
 

@@ -49,6 +49,7 @@ export default function ContractPanel({
   paymentsSaving = false,
   hasAumentos = false,
   hasPayments = false,
+  onCopy,
   savingMessage = "",
 }) {
   const [activeTab, setActiveTab] = useState("info");
@@ -194,6 +195,16 @@ export default function ContractPanel({
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {!isCreate && (
+                  <button
+                    type="button"
+                    onClick={() => onCopy && onCopy(editing)}
+                    className={`${BUTTON_STYLES.base} ${BUTTON_STYLES.outline} ${BUTTON_STYLES.sm}`}
+                    disabled={panelBusy}
+                  >
+                    Copiar contrato
+                  </button>
+                )}
                 {!isCreate && isView && (
                   <button
                     type="button"

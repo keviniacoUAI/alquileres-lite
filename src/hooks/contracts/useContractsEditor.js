@@ -46,6 +46,35 @@ export function useContractsEditor({
     });
   }, []);
 
+  const startCopy = useCallback(
+    (contrato) => {
+      if (!contrato) return;
+      const copied = {
+        id: "",
+        domicilio: contrato.domicilio || "",
+        inquilino: contrato.inquilino || "",
+        contacto: contrato.contacto || "",
+        inicio: toYMD(contrato.inicio) || todayISO(),
+        fin: toYMD(contrato.fin) || "",
+        precioMensual: digitsOnly(
+          contrato.precioMensual ??
+            contrato.lastPrecio ??
+            contrato.currentPrecio ??
+            "",
+        ),
+        aumento: contrato.aumento || "IPC",
+        periodicidad: contrato.periodicidad || "M",
+        notas: contrato.notas || "",
+      };
+      setEditingMode("create");
+      setEditing(copied);
+      if (setEditingAum) setEditingAum(null);
+      if (setEditingPago) setEditingPago(null);
+      if (setOpenMenuId) setOpenMenuId(null);
+    },
+    [setEditingAum, setEditingPago, setOpenMenuId],
+  );
+
   const startEdit = useCallback(
     (contrato) => {
       setEditing({
@@ -224,6 +253,7 @@ export function useContractsEditor({
     editingMode,
     setEditingMode,
     startNew,
+    startCopy,
     startEdit,
     startView,
     cancelEdit,
